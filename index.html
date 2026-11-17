@@ -309,7 +309,7 @@
   <div class="tools">
     <div class="searchbox">
       <button class="iconbtn" id="searchBtn" aria-label="Suchen"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></button>
-      <input id="q" type="search" placeholder="Titel, Sender" autocomplete="off" aria-label="Suche">
+      <input id="q" type="search" placeholder="Titel, Sender" autocomplete="off" aria-label="Suche" tabindex="-1">
     </div>
     <button class="avatar" id="avatar" aria-label="Konto und Einstellungen"></button>
   </div>
@@ -972,7 +972,7 @@ async function render(name, arg) {
   const token = ++viewToken;
   renderFailed = false;
   current = name; currentArg = arg;
-  if (name !== 'search') { $('#q').value = ''; $('.searchbox').classList.remove('open'); }
+  if (name !== 'search') { $('#q').value = ''; $('.searchbox').classList.remove('open'); $('#q').tabIndex = -1; }
   document.querySelectorAll('.links button').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   showApp();
   const main = $('#main');
@@ -2121,7 +2121,8 @@ $('#mLogout').onclick = () => {
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => go(b.dataset.view));
 
 /* ---------- Suche ---------- */
-$('#searchBtn').onclick = () => { $('.searchbox').classList.add('open'); $('#q').focus(); };
+// Suchfeld ist zu, solange nicht auf das Symbol gedrückt wird: Fernbedienung landet nie darauf (sonst öffnet sich die Tastatur)
+$('#searchBtn').onclick = () => { $('.searchbox').classList.add('open'); $('#q').tabIndex = 0; $('#q').focus(); };
 $('#q').addEventListener('input', debounce(() => {
   const q = $('#q').value.trim();
   if (q.length >= 2) go('search', q, current === 'search' ? 'replace' : 'push');
@@ -2155,7 +2156,7 @@ if (APP) {
     if (isForm(e.target)) setTimeout(() => { if (!isForm(document.activeElement)) document.body.classList.remove('kbd'); }, 0);
   });
 }
-$('#q').addEventListener('blur', () => { if (!$('#q').value) $('.searchbox').classList.remove('open'); });
+$('#q').addEventListener('blur', () => { if (!$('#q').value) { $('.searchbox').classList.remove('open'); $('#q').tabIndex = -1; } });
 
 window.addEventListener('scroll', () => $('#nav').classList.toggle('solid', scrollY > 30), { passive: true });
 
@@ -2172,7 +2173,7 @@ function layer() {
 function move(dir) {
   const root = layer();
   const list = [...root.querySelectorAll('[data-nav], button, input, select, video')]
-    .filter(e => !e.disabled && !e.classList.contains('chev') && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #setup, #toast')));
+    .filter(e => !e.disabled && !e.classList.contains('chev') && !(e.id === 'q' && !$('.searchbox').classList.contains('open')) && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #setup, #toast')));
   const cur = document.activeElement;
   if (!list.includes(cur)) {
     const start = root.querySelector('.btn.play, [data-nav]') || list[0];
