@@ -1,21 +1,30 @@
 // Heim-Proxy für den IPTV Player.
-// Läuft auf einem Rechner bei dir zu Hause, damit der Anbieter eine normale Heim-IP sieht
-// (so wie IPTV Smarters, das sich direkt vom Gerät aus verbindet).
-// Ein Cloudflare-Tunnel macht ihn per HTTPS für das iPhone erreichbar, ohne Router-Einstellungen.
+// Läuft auf deinem PC zu Hause. Der Anbieter sieht deine normale Heim-IP
+// (so wie bei IPTV Smarters, das sich direkt vom Gerät aus verbindet).
+// Die App wird gleich mit ausgeliefert: am PC http://localhost:8787 öffnen,
+// am Handy oder Tablet im selben WLAN die Adresse, die beim Start angezeigt wird.
+//
+// Nur Geräte im eigenen Netz haben Zugriff. Es wird nichts ins Internet freigegeben,
+// kein fremder Dienst ist beteiligt und es entstehen keine Kosten.
 //
 // Start:  node home-proxy.mjs        (Node.js 18 oder neuer)
-// Danach am PC http://localhost:8787/setup öffnen und den QR-Code mit dem iPhone scannen.
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 
 const UPSTREAM = process.env.UPSTREAM || 'http://ip.sltv.be:8080';
 const PORT = Number(process.env.PORT || 8787);
 const USER_AGENT = process.env.USER_AGENT || 'IPTVSmartersPro';
-const APP_URL = process.env.APP_URL || 'https://keremik.github.io/iptv-app/';
 const MAX_REDIRECTS = 5;
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const APP_FILE = [path.join(here, '..', 'index.html'), path.join(here, 'index.html')].find(f => fs.existsSync(f));
 
 // Schlüssel für signierte Adressen (Segmente auf anderen Servern nach einer Weiterleitung)
 const KEY = crypto.randomBytes(32);
@@ -36,7 +45,13 @@ const mask = u => String(u)
   .replace(/\/(live|movie|series|timeshift)\/[^/]+\/[^/]+\//, '/$1/***/***/')
   .replace(/(username|password)=[^&]*/g, '$1=***');
 
-let tunnelUrl = '';
+// Nur Anfragen aus dem eigenen Netz (PC selbst, WLAN, VPN-Bereiche)
+function isLocal(addr = '') {
+  const a = addr.replace(/^::ffff:/, '');
+  return a === '::1' || /^127\./.test(a) || /^10\./.test(a) || /^192\.168\./.test(a) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(a) || /^169\.254\./.test(a) || /^(fe80|fc|fd)/i.test(a) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a);
+}
 
 function sendText(res, status, body) {
   res.writeHead(status, { ...CORS, 'Content-Type': 'text/plain; charset=utf-8' });
@@ -120,7 +135,7 @@ async function proxy(req, res, reqUrl) {
 
   if (type.includes('mpegurl') || /\.m3u8$/.test(new URL(finalUrl).pathname)) {
     // Playlist: alle Adressen wieder über diesen Proxy, signiert
-    const self = `${req.headers['x-forwarded-proto'] || (req.headers['cf-connecting-ip'] ? 'https' : 'http')}://${req.headers.host}`;
+    const self = `http://${req.headers.host}`;
     const base = new URL(finalUrl);
     const wrap = u => {
       const abs = new URL(u, base).toString();
@@ -144,38 +159,46 @@ async function proxy(req, res, reqUrl) {
   Readable.fromWeb(up.body).on('error', () => res.destroy()).pipe(res);
 }
 
+function serveApp(res) {
+  if (!APP_FILE) return sendText(res, 404, 'index.html nicht gefunden. Ordnerstruktur behalten: index.html und proxy/ nebeneinander.');
+  const cfg = `<script>window.HOME_PROXY=${JSON.stringify({ upstream: UPSTREAM })}</script>`;
+  const html = fs.readFileSync(APP_FILE, 'utf8').replace('<!--HOME_PROXY-->', cfg);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
+
+function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat()
+    .filter(i => i && i.family === 'IPv4' && !i.internal && isLocal(i.address))
+    .map(i => `http://${i.address}:${PORT}`);
+}
+
 function setupPage(res) {
-  const link = tunnelUrl ? `${APP_URL}?proxy=${encodeURIComponent(tunnelUrl)}` : '';
+  const urls = lanAddresses();
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(`<!doctype html><html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Heim-Proxy</title>
-${tunnelUrl ? '' : '<meta http-equiv="refresh" content="3">'}
-<style>body{font-family:sans-serif;background:#070a2e;color:#fff;text-align:center;padding:30px}
-#qr{background:#fff;display:inline-block;padding:16px;border-radius:12px;margin:20px}
-a{color:#8cf;word-break:break-all}code{background:#1a1f4a;padding:2px 6px;border-radius:4px}</style></head><body>
-<h1>IPTV Heim-Proxy läuft</h1>
-${link ? `<p>Scanne den Code mit der iPhone-Kamera. Die App öffnet sich in Safari und übernimmt die Proxy-Adresse.</p>
-<div id="qr"></div><p><a href="${link}">${link}</a></p>
-<p>Proxy-Adresse: <code>${tunnelUrl}</code></p>
-<p>Die Adresse ändert sich bei jedem Neustart. Dann einfach den neuen Code scannen.</p>
+<style>body{font-family:sans-serif;background:#141414;color:#fff;text-align:center;padding:30px}
+.qr{background:#fff;display:inline-block;padding:16px;border-radius:12px;margin:12px}
+a{color:#8cf}code{background:#333;padding:2px 6px;border-radius:4px}</style></head><body>
+<h1>Heim-Proxy läuft</h1>
+<p>Am PC: <a href="/">http://localhost:${PORT}</a></p>
+${urls.length ? `<p>Am Handy oder Tablet (gleiches WLAN): Code mit der Kamera scannen</p>
+${urls.map((u, i) => `<div><div class="qr" id="qr${i}"></div><p><code>${u}</code></p></div>`).join('')}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script>new QRCode(document.getElementById('qr'), { text: ${JSON.stringify(link)}, width: 280, height: 280 });</script>`
-  : `<p>Warte auf den Cloudflare-Tunnel ... (Seite lädt sich selbst neu)</p>
-<p>Falls nichts passiert: Ist <code>cloudflared</code> installiert? Siehe Fenster mit dem Proxy.</p>`}
+<script>${JSON.stringify(urls)}.forEach((u, i) => new QRCode(document.getElementById('qr' + i), { text: u, width: 220, height: 220 }));</script>`
+  : '<p>Keine WLAN-Adresse gefunden. Ist der PC mit dem Netzwerk verbunden?</p>'}
 </body></html>`);
 }
 
 const server = http.createServer(async (req, res) => {
+  if (!isLocal(req.socket.remoteAddress)) return sendText(res, 403, 'Nur im eigenen Netz erlaubt');
   const reqUrl = new URL(req.url, 'http://localhost');
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
-    if (reqUrl.pathname === '/setup') {
-      // Einrichtungsseite nur am PC selbst, nicht über den Tunnel
-      if (req.headers['cf-connecting-ip']) return sendText(res, 404, 'Not found');
-      return setupPage(res);
-    }
     if (reqUrl.pathname === '/' && reqUrl.searchParams.has('u')) return await proxy(req, res, reqUrl);
-    if (reqUrl.pathname === '/') return sendText(res, 200, 'IPTV Heim-Proxy ok');
+    if (reqUrl.pathname === '/' || reqUrl.pathname === '/index.html') return serveApp(res);
+    if (reqUrl.pathname === '/setup') return setupPage(res);
     sendText(res, 404, 'Not found');
   } catch (e) {
     if (!res.headersSent) sendText(res, 500, 'Proxy-Fehler: ' + e.message);
@@ -183,48 +206,19 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Heim-Proxy läuft auf http://localhost:${PORT}  (Anbieter: ${UPSTREAM})`);
-  if (process.env.NO_TUNNEL) return;
-  startTunnel();
+server.on('error', e => {
+  console.log(e.code === 'EADDRINUSE' ? `Port ${PORT} ist belegt. Läuft der Proxy schon in einem anderen Fenster?` : e.message);
+  process.exit(1);
 });
 
-function startTunnel() {
-  const bin = process.env.CLOUDFLARED || 'cloudflared';
-  let cf;
-  try {
-    cf = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://localhost:${PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (e) {
-    return noTunnel(e);
-  }
-  cf.on('error', noTunnel);
-  const onData = d => {
-    const m = String(d).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (m && !tunnelUrl) {
-      tunnelUrl = m[0];
-      console.log('\nTunnel bereit: ' + tunnelUrl);
-      console.log(`Jetzt am PC öffnen:  http://localhost:${PORT}/setup  und den QR-Code mit dem iPhone scannen.\n`);
-      openBrowser(`http://localhost:${PORT}/setup`);
-    }
-  };
-  cf.stdout.on('data', onData);
-  cf.stderr.on('data', onData);
-  cf.on('exit', code => {
-    console.log('cloudflared beendet (Code ' + code + '). Neustart in 5 s ...');
-    tunnelUrl = '';
-    setTimeout(startTunnel, 5000);
-  });
-  const stop = () => { cf.kill(); process.exit(0); };
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
-}
-
-function noTunnel(e) {
-  console.log('\ncloudflared wurde nicht gefunden (' + (e.code || e.message) + ').');
-  console.log('Installieren:  Windows: winget install --id Cloudflare.cloudflared');
-  console.log('               Mac:     brew install cloudflared');
-  console.log('Danach dieses Programm neu starten.\n');
-}
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`\nHeim-Proxy läuft (Anbieter: ${UPSTREAM})`);
+  console.log(`  Am PC:                 http://localhost:${PORT}`);
+  for (const u of lanAddresses()) console.log(`  Handy/Tablet im WLAN:  ${u}`);
+  console.log(`  QR-Code fürs Handy:    http://localhost:${PORT}/setup`);
+  console.log('\nDieses Fenster offen lassen, solange du schaust. Beenden mit Strg+C.\n');
+  if (!process.env.NO_BROWSER) openBrowser(`http://localhost:${PORT}/`);
+});
 
 function openBrowser(url) {
   const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]

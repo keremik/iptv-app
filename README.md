@@ -1,52 +1,58 @@
 # IPTV Player
 
-Web-App für Xtream-Codes-Anbieter: https://keremik.github.io/iptv-app/
+Web-App für Xtream-Codes-Anbieter, gestaltet wie ein Streamingdienst:
+Titelbild, Reihen pro Kategorie, Details mit Staffeln und Folgen, Weiterschauen, Meine Liste, Suche.
 
-## So funktioniert es
+## Warum ein Heim-Proxy?
 
 IPTV Smarters ist eine native App und verbindet sich direkt vom Gerät mit dem Anbieter.
-Eine Web-App im Browser kann das nicht. Der Browser sperrt `http://`-Streams auf einer `https://`-Seite,
-und viele Anbieter sperren Rechenzentren wie Cloudflare.
+Ein Browser kann das nicht direkt: Er sperrt Anfragen an fremde Server (CORS),
+und `http://`-Streams auf `https://`-Seiten.
 
-Deshalb läuft ein kleiner **Heim-Proxy** auf deinem PC oder Mac zu Hause:
+Deshalb läuft ein kleiner **Heim-Proxy** auf deinem PC oder Mac. Er liefert die App aus
+und holt die Daten vom Anbieter, mit deiner normalen Heim-IP:
 
 ```
-iPhone (Safari) --https--> Cloudflare-Tunnel --> Heim-Proxy (dein PC, Heim-IP) --http--> Anbieter
+Browser (PC, Handy, Tablet im WLAN) --> Heim-Proxy auf deinem PC --> Anbieter
 ```
 
-Der Anbieter sieht damit deine normale Heim-IP, wie bei Smarters.
-Der Tunnel ist kostenlos, braucht kein Konto und keine Router-Einstellungen.
+- Kostenlos, kein Konto, kein fremder Dienst dazwischen.
+- Nur Geräte in deinem eigenen Netz haben Zugriff. Nichts wird ins Internet freigegeben.
+- Die Zugangsdaten bleiben in deinem Browser. Sie stehen nicht in diesen Dateien.
 
 ## Einrichtung (einmalig)
 
-1. Diesen Ordner `proxy/` auf den PC laden
-   (auf GitHub: **Code → Download ZIP**, entpacken).
-2. Starten:
+1. **Node.js** installieren: https://nodejs.org, die Version „LTS“.
+2. Dieses Repo herunterladen (auf GitHub: **Code → Download ZIP**) und entpacken.
+   `index.html` und der Ordner `proxy/` müssen nebeneinander bleiben.
+3. Starten:
    - **Windows:** `proxy/start-proxy-windows.bat` doppelklicken.
-     Beim ersten Mal werden Node.js und cloudflared installiert. Danach Fenster schließen und erneut doppelklicken.
-   - **Mac:** `proxy/start-proxy-mac.command` doppelklicken (braucht [Homebrew](https://brew.sh)).
-     Wenn macOS warnt: Rechtsklick → Öffnen.
-3. Im Browser des PCs öffnet sich `http://localhost:8787/setup` mit einem QR-Code.
-4. QR-Code mit der iPhone-Kamera scannen. Die App öffnet sich in Safari und übernimmt die Proxy-Adresse.
-5. In der App Server, Benutzername und Passwort eintragen und anmelden.
+     Fragt die Windows-Firewall nach: nur „Private Netzwerke“ erlauben.
+   - **Mac:** `proxy/start-proxy-mac.command` doppelklicken. Wenn macOS warnt: Rechtsklick → Öffnen.
+4. Der Browser öffnet `http://localhost:8787`. Benutzername und Passwort eintragen, fertig.
 
-Das Fenster mit dem Proxy muss offen bleiben, solange du schaust. Der PC darf nicht schlafen.
-Die Tunnel-Adresse ändert sich bei jedem Neustart. Dann einfach den neuen QR-Code scannen,
-die Zugangsdaten bleiben gespeichert.
+**Handy oder Tablet im selben WLAN:** Im Proxy-Fenster steht eine Adresse wie
+`http://192.168.178.20:8787`. Diese im Browser öffnen, oder am PC `http://localhost:8787/setup`
+aufrufen und den QR-Code scannen.
 
-## Wiedergabe
+Das Proxy-Fenster muss offen bleiben, solange du schaust.
 
-- **Live-Sender:** iPhone/iPad/Safari spielen `.m3u8` (HLS) mit dem eingebauten Player.
-  Desktop-Browser nutzen `.ts` mit mpegts.js.
-- **Filme/Serien:** direkt als Datei. Safari kann nur `mp4`/`m3u8`, keine `mkv`.
-- Bei einem Fehler fragt die App den Proxy und zeigt den genauen Grund in der Statuszeile
+## Bedienung
+
+- Maus, Touch oder Tastatur/Fernbedienung (Pfeiltasten, Enter, Zurück/Escape).
+- **Live TV:** Sender antippen. Oben stehen die aktuelle und die nächste Sendung.
+  Senderwechsel mit ⏮ ⏭, Bild-auf/Bild-ab oder Pfeil hoch/runter.
+- **Filme/Serien:** Antippen öffnet die Details. „+“ legt sie in „Meine Liste“.
+  Die Position wird gespeichert und erscheint unter „Weiterschauen“. Die nächste Folge startet automatisch.
+- Bei einem Wiedergabe-Fehler steht der genaue Grund unten im Hinweis
   (z. B. `HTTP 403` = Anbieter sperrt, `ECONNREFUSED` = Server nicht erreichbar).
-- Beim Zurückgehen wird der Stream beendet, damit das Verbindungslimit des Anbieters frei wird.
+
+Safari (iPhone/iPad) spielt nur `mp4` und `m3u8`. Filme im Format `mkv` laufen dort nicht,
+in Chrome oder Edge am PC meistens schon.
 
 ## Dateien
 
 - `index.html`: die ganze Web-App.
 - `proxy/home-proxy.mjs`: Heim-Proxy (Node.js 18+, keine weiteren Pakete).
-  Einstellungen per Umgebungsvariable: `UPSTREAM`, `PORT`, `USER_AGENT`, `NO_TUNNEL=1`.
-- `proxy/worker.js`: älterer Cloudflare-Worker-Proxy (`iptv-proxy.keremirmak02.workers.dev`).
-  Funktioniert nur, wenn der Anbieter Cloudflare nicht sperrt.
+  Einstellungen per Umgebungsvariable: `UPSTREAM` (Anbieter-Server), `PORT`, `USER_AGENT`.
+- `proxy/worker.js`: älterer Cloudflare-Worker-Proxy, wird nicht mehr gebraucht.
