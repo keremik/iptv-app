@@ -112,6 +112,21 @@ in Chrome oder Edge am PC meistens schon.
   Frames, keine fremden Formularziele. Das begrenzt den Schaden, falls ein Anbieter manipulierte Texte liefert.
 - Alle Anzeigetexte des Anbieters werden als Text gesetzt, nie als HTML ausgeführt.
 
+## Allgemeine App für alle (ab Version 1.1)
+
+IPFLIX ist eine allgemeine IPTV-App wie andere Xtream-Player: Jeder meldet sich mit den Zugangsdaten
+seines eigenen Anbieters an. Die App läuft komplett auf dem Gerät und braucht keinen fremden Server.
+
+- **Erster Start:** Anmeldung mit Server, Benutzername und Passwort, oder einfach den kompletten
+  M3U-Link (`.../get.php?username=...&password=...`) ins erste Feld einfügen.
+- **Danach Einrichtung:** Lieblingsverein (für das nächste Spiel und die passenden Sender), Sprachen
+  (Deutsch, Türkisch, Englisch, Französisch, Arabisch, Kurdisch, Spanisch, Italienisch, Polnisch,
+  Niederländisch, Portugiesisch, Russisch, Balkan, Albanisch oder alle), maximale Auflösung und Sparmodus.
+- **Später ändern:** Profil-Symbol oben rechts → „Einstellungen“. „Konto wechseln“ für andere Zugangsdaten.
+- Zugangsdaten, Verlauf und Einstellungen bleiben nur auf dem jeweiligen Gerät.
+- Die App enthält keine Zugangsdaten und keine persönlichen Adressen. Sie kann auf beliebig vielen
+  Sticks installiert werden.
+
 ## Als App auf dem Fernseher (Android-Stick)
 
 Im Ordner `android/` liegt eine native Android-TV-App (Paket `com.ipflix.app`). Sie zeigt dieselbe

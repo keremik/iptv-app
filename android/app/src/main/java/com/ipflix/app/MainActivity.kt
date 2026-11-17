@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.http.HttpResponseCache
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,6 +17,7 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -23,6 +25,11 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewAssetLoader
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -49,6 +56,7 @@ class MainActivity : AppCompatActivity() {
   private lateinit var titleView: TextView
   private lateinit var subtitleView: TextView
   private var player: ExoPlayer? = null
+  private lateinit var assetLoader: WebViewAssetLoader
   private val main = Handler(Looper.getMainLooper())
 
   private var altUrl = ""
@@ -59,6 +67,11 @@ class MainActivity : AppCompatActivity() {
   @SuppressLint("SetJavaScriptEnabled")
   override fun onCreate(saved: Bundle?) {
     super.onCreate(saved)
+    // Zwischenspeicher fuer Bilder (Poster/Logos), damit sie nicht jedes Mal neu geladen werden
+    try { HttpResponseCache.install(File(cacheDir, "http"), 60L * 1024 * 1024) } catch (e: Exception) {}
+    assetLoader = WebViewAssetLoader.Builder()
+      .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+      .build()
     root = FrameLayout(this)
 
     webView = WebView(this)
@@ -76,12 +89,24 @@ class MainActivity : AppCompatActivity() {
       // Die Oberflaeche bleibt in der App; echte Links (z. B. App Store) oeffnen extern,
       // damit ein versehentlicher Klick die App nicht ersetzt.
       override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+        if (request.url.host == WebViewAssetLoader.DEFAULT_DOMAIN) return false
         val scheme = request.url.scheme ?: ""
         if (scheme == "http" || scheme == "https") {
           try { startActivity(Intent(Intent.ACTION_VIEW, request.url)) } catch (e: Exception) {}
           return true
         }
         return false
+      }
+
+      // Die Oberflaeche liegt unter https://appassets.androidplatform.net/assets/web/ (eigene, sichere Adresse).
+      // /proxy?u=... holt Daten und Bilder direkt beim Anbieter des Nutzers, ohne fremden Server.
+      override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+        val url = request.url
+        if (url.host == WebViewAssetLoader.DEFAULT_DOMAIN && url.path == "/proxy") {
+          val target = url.getQueryParameter("u") ?: return textResponse(400, "Adresse fehlt")
+          return proxyFetch(target)
+        }
+        return assetLoader.shouldInterceptRequest(url)
       }
     }
     webView.webChromeClient = WebChromeClient()
@@ -128,12 +153,50 @@ class MainActivity : AppCompatActivity() {
     root.addView(overlay, matchParent())
 
     setContentView(root)
-    webView.loadUrl("file:///android_asset/web/index.html")
+    webView.loadUrl("https://" + WebViewAssetLoader.DEFAULT_DOMAIN + "/assets/web/index.html")
   }
+
+  // Holt eine Adresse beim Anbieter (folgt Weiterleitungen, auch auf IP-Adressen) und gibt sie an die Oberflaeche.
+  private fun proxyFetch(target: String): WebResourceResponse {
+    return try {
+      var u = URL(target)
+      if (u.protocol != "http" && u.protocol != "https") return textResponse(400, "Nur http/https")
+      var conn: HttpURLConnection
+      var hops = 0
+      while (true) {
+        conn = u.openConnection() as HttpURLConnection
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = 15000
+        conn.readTimeout = 30000
+        conn.setRequestProperty("User-Agent", UA)
+        conn.setRequestProperty("Accept", "*/*")
+        val code = conn.responseCode
+        val loc = conn.getHeaderField("Location")
+        if (code in 300..399 && loc != null && hops < 5) {
+          conn.disconnect(); u = URL(u, loc); hops++; continue
+        }
+        break
+      }
+      val code = conn.responseCode
+      if (code in 300..399) return textResponse(502, "Zu viele Weiterleitungen")
+      val ct = conn.contentType ?: "application/octet-stream"
+      val mime = ct.substringBefore(";").trim().ifEmpty { "application/octet-stream" }
+      val charset = Regex("charset=([^;]+)", RegexOption.IGNORE_CASE).find(ct)?.groupValues?.get(1)?.trim() ?: "utf-8"
+      val stream = if (code >= 400) (conn.errorStream ?: ByteArrayInputStream(ByteArray(0))) else conn.inputStream
+      val reason = conn.responseMessage?.takeIf { it.isNotBlank() } ?: (if (code < 400) "OK" else "Error")
+      WebResourceResponse(mime, charset, code, reason, mapOf("Access-Control-Allow-Origin" to "*"), stream)
+    } catch (e: Exception) {
+      textResponse(502, "Anbieter nicht erreichbar: " + (e.message ?: e.javaClass.simpleName))
+    }
+  }
+
+  private fun textResponse(code: Int, msg: String) = WebResourceResponse(
+    "text/plain", "utf-8", code, if (code < 400) "OK" else "Error",
+    mapOf("Access-Control-Allow-Origin" to "*"), ByteArrayInputStream(msg.toByteArray()))
 
   private fun mediaSourceFactory(): DefaultMediaSourceFactory {
     val http = DefaultHttpDataSource.Factory()
-      .setUserAgent("IPTVSmartersPro")
+      .setUserAgent(UA)
       .setAllowCrossProtocolRedirects(true)
       .setConnectTimeoutMs(15000)
       .setReadTimeoutMs(15000)
@@ -281,6 +344,8 @@ class MainActivity : AppCompatActivity() {
     webView.destroy()
     super.onDestroy()
   }
+
+  companion object { const val UA = "IPTVSmartersPro" }
 
   private fun matchParent() = FrameLayout.LayoutParams(
     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)

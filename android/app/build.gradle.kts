@@ -17,8 +17,8 @@ android {
     applicationId = "com.ipflix.app"
     minSdk = 21
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1"
   }
   buildTypes {
     getByName("release") {
@@ -36,6 +36,7 @@ android {
 dependencies {
   implementation("androidx.core:core-ktx:1.13.1")
   implementation("androidx.appcompat:appcompat:1.7.0")
+  implementation("androidx.webkit:webkit:1.11.0")
   implementation("androidx.media3:media3-exoplayer:1.3.1")
   implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
   implementation("androidx.media3:media3-ui:1.3.1")
@@ -48,6 +49,10 @@ tasks.register<Copy>("syncWeb") {
   from(rootProject.file("../broadcast.json"))
   from(rootProject.file("../icon.png"))
   into(layout.projectDirectory.dir("src/main/assets/web"))
+  // Allgemeine App: keine persoenliche Proxy-Adresse in der App-Version
+  filesMatching("index.html") {
+    filter { line -> line.replace("https://iptv-proxy.keremirmak02.workers.dev", "") }
+  }
 }
 tasks.register<Copy>("syncWebLib") {
   from(rootProject.file("../lib"))

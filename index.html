@@ -200,7 +200,7 @@
   #toast a { margin-top: 10px; padding: 8px 16px; font-size: 15px; text-decoration: none; white-space: normal; }
 
   /* Anmeldung */
-  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 96px 16px 40px;
+  #login, #setup { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 96px 16px 40px;
            background: radial-gradient(ellipse at top, #3b0d12, var(--bg) 65%); }
   .login-card { width: 100%; max-width: 450px; background: rgba(0,0,0,.75); padding: 48px 56px; border-radius: 6px; display: flex; flex-direction: column; gap: 14px; }
   .login-card h1 { margin: 0 0 8px; font-size: 32px; }
@@ -209,6 +209,16 @@
   .login-card input:focus { background: #454545; outline: none; }
   .login-card .hint { color: #8c8c8c; font-size: 13px; line-height: 1.5; margin: 6px 0 0; }
   #loginErr { color: #e87c03; font-size: 14px; min-height: 1em; margin: 0; }
+  .setup-card { max-width: 760px; }
+  .setup-card h3 { margin: 4px 0 2px; font-size: 19px; }
+  .setup-card .hint { margin: 0 0 8px; }
+  .sgroup { padding-bottom: 6px; border-bottom: 1px solid #2c2c2c; }
+  .teamrow { display: flex; gap: 10px; }
+  .teamrow input { flex: 1; min-width: 0; }
+  .teamrow .btn { padding: 10px 18px; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { padding: 9px 18px; border-radius: 999px; border: 2px solid #4d4d4d; background: #232323; cursor: pointer; font-size: 15px; }
+  .chip[aria-pressed="true"] { background: #fff; color: #000; border-color: #fff; font-weight: 700; }
 
   @media (max-width: 760px) {
     nav { flex-wrap: wrap; gap: 8px 18px; padding: 10px 16px; }
@@ -276,6 +286,8 @@
   .no-gap .login-card > * + * { margin-top: 14px; }
   .no-gap .login-card label > * + * { margin-top: 6px; }
   .no-gap #toastActs > * { margin-right: 8px; }
+  .no-gap .chips > * { margin: 0 10px 10px 0; }
+  .no-gap .teamrow > * + * { margin-left: 10px; }
 </style>
 </head>
 <body class="auth">
@@ -300,10 +312,8 @@
 
 <div id="menu" hidden>
   <div class="info" id="menuInfo"></div>
-  <button id="mSettings">Zugangsdaten ändern</button>
-  <button id="mLang"></button>
-  <button id="mTeam"></button>
-  <button id="mRes"></button>
+  <button id="mSetup">Einstellungen (Verein, Sprachen, Anzeige)</button>
+  <button id="mSettings">Konto wechseln</button>
   <button id="mPrefs">Empfehlungen zurücksetzen</button>
   <button id="mRefresh">Listen neu laden</button>
   <button id="mLogout">Abmelden</button>
@@ -314,13 +324,42 @@
 <section id="login" hidden>
   <form class="login-card" id="loginForm" autocomplete="on">
     <h1>Anmelden</h1>
-    <label>Server (mit http:// und Port)<input id="srv" placeholder="http://server:8080" autocomplete="url" required></label>
-    <label>Benutzername<input id="usr" autocomplete="username" required></label>
-    <label>Passwort<input id="pw" type="password" autocomplete="current-password" required></label>
+    <p class="hint">Mit den Zugangsdaten deines IPTV-Anbieters (Xtream Codes). Du kannst auch einfach deinen kompletten M3U-Link ins erste Feld einfügen.</p>
+    <label>Server oder M3U-Link<input id="srv" placeholder="http://server:8080" autocomplete="url" required></label>
+    <label>Benutzername<input id="usr" autocomplete="username"></label>
+    <label>Passwort<input id="pw" type="password" autocomplete="current-password"></label>
     <label id="prxWrap">Proxy-Adresse<input id="prx" placeholder="http://localhost:8787"></label>
     <p id="loginErr"></p>
     <button class="btn red" type="submit">Anmelden</button>
-    <p class="hint">Die Zugangsdaten werden nur in diesem Browser gespeichert.</p>
+    <p class="hint">Die Zugangsdaten werden nur auf diesem Gerät gespeichert.</p>
+  </form>
+</section>
+
+<section id="setup" hidden>
+  <form class="login-card setup-card" id="setupForm">
+    <h1 id="setupTitle">Einstellungen</h1>
+    <div class="sgroup">
+      <h3>Lieblingsverein</h3>
+      <p class="hint">Die App zeigt dann das nächste Spiel und die passenden Sender. Leer lassen, wenn du keine Spiele angezeigt haben willst.</p>
+      <div class="teamrow"><input id="teamIn" placeholder="z. B. Galatasaray, Bayern Munich" autocomplete="off"><button type="button" class="btn more" id="teamCheck">Prüfen</button></div>
+      <p id="teamRes" class="hint"></p>
+    </div>
+    <div class="sgroup">
+      <h3>Sprachen</h3>
+      <p class="hint">Nur Sender, Filme und Serien in diesen Sprachen anzeigen.</p>
+      <div class="chips" id="langChips"></div>
+    </div>
+    <div class="sgroup">
+      <h3>Maximale Auflösung</h3>
+      <p class="hint">Bei einfachen Full-HD-Sticks „Full HD“ wählen, dann werden 4K-Varianten ausgeblendet.</p>
+      <div class="chips" id="resChips"></div>
+    </div>
+    <div class="sgroup">
+      <h3>Darstellung</h3>
+      <p class="hint">Der Sparmodus schaltet Effekte ab und macht schwache Geräte flüssiger.</p>
+      <div class="chips" id="liteChips"></div>
+    </div>
+    <button class="btn red" type="submit">Fertig</button>
   </form>
 </section>
 
@@ -353,8 +392,8 @@ const DEFAULT_PROXY = 'https://iptv-proxy.keremirmak02.workers.dev';   // für d
 // Läuft die Oberfläche in der Android-App (Stick)? Dann spielt ein nativer Player (ExoPlayer) ab.
 const APP = !!(window.NativePlayer && window.NativePlayer.play);
 // Schwaches Geraet (z. B. 1080p-Stick): teure Effekte aus, weniger Bilder gleichzeitig.
-const LITE = !!(APP && window.NativePlayer.lite && (function () { try { return window.NativePlayer.lite(); } catch (e) { return false; } })());
-try { if (LITE) document.documentElement.classList.add('lite'); } catch (e) {}
+const NATIVE_LITE = !!(APP && window.NativePlayer.lite && (function () { try { return window.NativePlayer.lite(); } catch (e) { return false; } })());
+let LITE = NATIVE_LITE;
 let appPos = 0, appDur = 0;
 const curTime = () => APP ? appPos : video.currentTime;
 const curDur = () => APP ? appDur : video.duration;
@@ -379,7 +418,7 @@ window.__player = {
   switch: function (step) { switchChannel(+step); },
 };
 function nativeSubtitle(t) { if (APP && window.NativePlayer.subtitle) { try { window.NativePlayer.subtitle(t || ''); } catch (e) {} } }
-const ROW_MAX = LITE ? 16 : 30;
+let ROW_MAX = LITE ? 16 : 30;
 
 // Ältere Browser (Fernseher) erkennen: kein Flexbox-"gap", kein :focus-visible
 (function () {
@@ -418,6 +457,14 @@ const store = {
   get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
 };
+// Sparmodus: Automatisch (schwaches Gerät erkannt), immer an oder aus
+let liteMode = store.get('liteMode', 'auto');
+function applyLite() {
+  LITE = liteMode === 'on' ? true : liteMode === 'off' ? false : NATIVE_LITE;
+  ROW_MAX = LITE ? 16 : 30;
+  try { document.documentElement.classList.toggle('lite', LITE); } catch (e) {}
+}
+applyLite();
 const first = x => Array.isArray(x) ? x[0] : x;
 const year = s => (String(s || '').match(/\d{4}/) || [''])[0];
 const fold = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -437,15 +484,16 @@ if (linkProxy && /^https?:\/\//.test(linkProxy)) {
   history.replaceState(null, '', location.pathname);
 }
 
-if (cfg && !HP && !cfg.proxy) cfg.proxy = DEFAULT_PROXY;
+if (cfg && !HP && !APP && !cfg.proxy && DEFAULT_PROXY) cfg.proxy = DEFAULT_PROXY;
 
 const base = () => cfg.server.replace(/\/$/, '');
 const cred = () => `${enc(cfg.user)}/${enc(cfg.pass)}`;
 // Alle Anfragen über den Proxy (Heim-Proxy: gleiche Adresse wie die App)
-const px = url => HP ? `/?u=${enc(url)}` : cfg.proxy ? `${cfg.proxy.replace(/\/$/, '')}/?u=${enc(url)}` : url;
+// In der App holt der eingebaute Abrufdienst alles direkt vom Anbieter (kein fremder Server).
+const px = url => APP ? `/proxy?u=${enc(url)}` : HP ? `/?u=${enc(url)}` : cfg.proxy ? `${cfg.proxy.replace(/\/$/, '')}/?u=${enc(url)}` : url;
 
 // http-Bilder kann eine https-Seite nicht laden, daher über den Proxy
-const imgSrc = u => !u ? '' : (!HP && location.protocol === 'https:' && /^http:/i.test(u) && cfg && cfg.proxy)
+const imgSrc = u => !u ? '' : APP ? (/^http:/i.test(u) ? `/proxy?u=${enc(u)}` : u) : (!HP && location.protocol === 'https:' && /^http:/i.test(u) && cfg && cfg.proxy)
   ? `${cfg.proxy.replace(/\/$/, '')}/?img=${enc(u)}` : u;
 
 function api(action, extra = '') {
@@ -468,7 +516,8 @@ const once = (key, fn) => memo[key] || (memo[key] = fn().catch(e => { delete mem
 const arr = a => Array.isArray(a) ? a : [];
 
 // Anbieter-Namen aufräumen: "(DE-) The Mummy - 2026" -> "The Mummy" (Jahr 2026), "DE: RTL HD" -> "RTL HD"
-const LANG_PREFIX = /^\s*(?:[\[(|]+\s*[A-Za-z]{2,4}\s*[-:]?\s*[\])|]+|(?:DE|GER|TR|TUR|AT|EN|FR)\s*[-:|★•]+)\s*/;
+let LANG_PREFIX = /^\s*(?:[\[(|]+\s*[A-Za-z]{2,4}\s*[-:]?\s*[\])|]+|(?:DE|GER|TR|TUR|AT|EN|FR)\s*[-:|★•]+)\s*/;
+let CHAN_SPACE = /^(?:DE|GER|TR|TUR|AT)\s+(?=\S)/;   // Sprachkürzel mit Leerzeichen am Anfang (wird je nach Sprachen neu gebaut)
 const YEAR_SUFFIX = /\s*(?:[-–|]\s*|\()((?:19|20)\d{2})\)?\s*$/;
 function pretty(name) {
   const raw = String(name || '');
@@ -477,7 +526,7 @@ function pretty(name) {
   if (m && m.index > 0) { yr = m[1]; title = title.slice(0, m.index).trim(); }
   return { title: title || raw, year: yr };
 }
-const chanName = name => String(name || '').replace(LANG_PREFIX, '').replace(/^(?:DE|GER|TR|TUR|AT)\s+(?=\S)/, '').trim() || String(name || '');
+const chanName = name => String(name || '').replace(LANG_PREFIX, '').replace(CHAN_SPACE, '').trim() || String(name || '');
 // Trenn-Einträge des Anbieters wie "-- TURKIYE --" oder "##### DE #####" sind keine Sender
 const SEP = '[-–—=#*_~•●★▬■◆►◄|.:+<>]';
 const PLACEHOLDER = new RegExp(`^\\s*${SEP}{2,}.*${SEP}{2,}\\s*$|^[^A-Za-z0-9\\u00c0-\\u024f]*$`);
@@ -486,7 +535,7 @@ const isPlaceholder = name => PLACEHOLDER.test(String(name || ''));
 const KEEP_UPPER = new Set(['HEVC', 'H265', 'H264', 'UEFA', 'NFL', 'NBA', 'WWE', 'UFC', 'MOTO', 'XXL']);
 function prettyCat(name) {
   const raw = String(name || '');
-  let t = raw.replace(LANG_PREFIX, '').replace(/^(?:DE|GER|TR|TUR|AT)\s+(?=\S)/, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
+  let t = raw.replace(LANG_PREFIX, '').replace(CHAN_SPACE, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
   if (t === t.toUpperCase()) {
     t = t.replace(/[^\s\/|&+\-]+/g, w => w.length <= 3 || /\d/.test(w) || KEEP_UPPER.has(w) ? w : w.charAt(0) + w.slice(1).replace(/İ/g, 'i').toLowerCase());
   }
@@ -508,23 +557,65 @@ const getVodInfo = id => once('v' + id, () => api('get_vod_info', '&vod_id=' + e
 const getSeriesInfo = id => once('s' + id, () => api('get_series_info', '&series_id=' + enc(id)));
 const clearCache = () => { for (const k in memo) delete memo[k]; };
 
-/* ---------- Sprachfilter: nur deutsche und türkische Inhalte ---------- */
-let langOnly = store.get('langOnly', true);
-const langMiss = new Set();
-const KIND_LABEL = { live: 'Live TV', movie: 'Filmen', series: 'Serien' };
-const LANG_WORD = /^(deutsch|german|allemand|allemagne|alman|osterreich|oesterreich|austria|turk|tuerk|turquie)/;
-const LANG_CODE_ANY = new Set(['ger', 'tr', 'tur']);
-const LANG_CODE_FIRST = new Set(['de', 'at']);     // "de" ist in FR/ES ein normales Wort, daher nur als Kürzel am Anfang
-
-// Kategorie, z. B. "DE | Kino", "|TR| Ulusal", "GERMANY HD", "Türkiye", "VOD [DE] Action", "Sky - DE"
-function catLangOk(name) {
+/* ---------- Sprachen ----------
+   words: Wortanfänge im Kategorienamen, safe: eindeutige Kürzel überall,
+   codes: Kürzel am Anfang, in Klammern/Strichen oder am Ende ("DE | Kino", "[TR]", "Sky - DE"). */
+const LANGS = {
+  de: { label: 'Deutsch', words: ['deutsch', 'german', 'allemand', 'allemagne', 'almanya', 'alman', 'osterreich', 'oesterreich', 'austria', 'schweiz'], safe: ['ger', 'deu'], codes: ['DE', 'GER', 'DEU', 'AT', 'CH'] },
+  tr: { label: 'Türkisch', words: ['turk', 'tuerk', 'turquie', 'turkiye', 'turkey'], safe: ['tr', 'tur'], codes: ['TR', 'TUR'] },
+  en: { label: 'Englisch', words: ['english', 'england', 'british', 'anglais', 'ingilizce'], safe: ['eng', 'usa'], codes: ['EN', 'ENG', 'UK', 'GB', 'US', 'USA'] },
+  fr: { label: 'Französisch', words: ['france', 'french', 'francais', 'fransiz'], safe: ['fra'], codes: ['FR', 'FRA'] },
+  ar: { label: 'Arabisch', words: ['arab'], safe: ['ara', 'arb'], codes: ['AR', 'ARA', 'ARB'] },
+  ku: { label: 'Kurdisch', words: ['kurd'], safe: ['kur'], codes: ['KU', 'KUR'] },
+  es: { label: 'Spanisch', words: ['spain', 'spanish', 'espana', 'espanol', 'latino'], safe: ['esp'], codes: ['ES', 'ESP', 'LAT'] },
+  it: { label: 'Italienisch', words: ['ital'], safe: ['ita'], codes: ['IT', 'ITA'] },
+  pl: { label: 'Polnisch', words: ['polska', 'polish', 'polski'], safe: ['pol'], codes: ['PL', 'POL'] },
+  nl: { label: 'Niederländisch', words: ['nederland', 'dutch', 'holland', 'netherlands'], safe: ['ned'], codes: ['NL', 'NED'] },
+  pt: { label: 'Portugiesisch', words: ['portug', 'brasil', 'brazil'], safe: ['por'], codes: ['PT', 'POR', 'BR'] },
+  ru: { label: 'Russisch', words: ['russ'], safe: ['rus'], codes: ['RU', 'RUS'] },
+  bk: { label: 'Balkan (Ex-YU)', words: ['balkan', 'exyu', 'srbija', 'hrvatska', 'bosna', 'serbia', 'croatia', 'bosnia'], safe: ['exyu', 'srb', 'hrv', 'bih'], codes: ['EXYU', 'RS', 'HR', 'BA', 'SRB', 'HRV', 'BIH'] },
+  al: { label: 'Albanisch', words: ['shqip', 'albania', 'albanian', 'arnavut'], safe: ['alb'], codes: ['AL', 'ALB'] },
+};
+const LANG_KEYS = Object.keys(LANGS);
+// Kürzel, die als erstes Wort mit Leerzeichen sicher weg können (nicht z. B. "AL" wie in "Al Jazeera")
+const SPACE_SAFE = new Set(['DE', 'GER', 'DEU', 'TR', 'TUR', 'AT', 'FR', 'FRA', 'PL', 'POL', 'NL', 'NED', 'RU', 'RUS', 'EXYU', 'ALB', 'KUR', 'ARA', 'ENG', 'ITA', 'ESP', 'POR', 'SRB', 'HRV', 'BIH']);
+LANG_KEYS.forEach(k => {
+  const L = LANGS[k], c = L.codes.join('|');
+  L.reBr = new RegExp(`[\\[(|]\\s*(?:${c})\\s*[-\\])|]`);
+  L.reEnd = new RegExp(`[-|:]\\s*(?:${c})\\s*$`);
+  L.rePre = new RegExp(`^\\s*[\\[(|]*\\s*(?:${c})\\s*[-\\])|:★•]`);
+});
+function langMatch(name, k) {
+  const L = LANGS[k];
   name = String(name || '');
   const t = fold(name).split(/[^a-z0-9]+/).filter(Boolean);
-  return t.some(w => LANG_WORD.test(w) || LANG_CODE_ANY.has(w)) || LANG_CODE_FIRST.has(t[0]) ||
-    /[\[(|]\s*(DE|AT)\s*[-\])|]/.test(name) || /[-|:]\s*(DE|AT)\s*$/.test(name);
+  if (t.some(w => L.safe.indexOf(w) >= 0 || L.words.some(x => w.indexOf(x) === 0))) return true;
+  if (t.length && L.codes.indexOf(t[0].toUpperCase()) >= 0) return true;
+  return L.reBr.test(name) || L.reEnd.test(name);
 }
-// Einzelner Titel mit Kürzel vorn, z. B. "(DE-) Film", "TR: Show TV", "|DE| RTL"
-const itemLangOk = name => /^\s*[\[(|]*\s*(DE|GER|TR|TUR|AT)\s*[-\])|:★•]/.test(String(name || ''));
+const langOf = name => LANG_KEYS.filter(k => langMatch(name, k))[0] || '';
+const itemLang = raw => LANG_KEYS.filter(k => LANGS[k].rePre.test(String(raw || '')))[0] || '';
+
+// Gewählte Sprachen ([] = alle). Bisherige Nutzer behalten Deutsch + Türkisch.
+let langs = store.get('langs', null);
+if (!Array.isArray(langs)) langs = cfg && store.get('langOnly', true) !== false ? ['de', 'tr'] : [];
+langs = langs.filter(k => LANGS[k]);
+function setLangs(list) {
+  langs = list.filter(k => LANGS[k]);
+  store.set('langs', langs);
+  const codes = { DE: 1, GER: 1, TR: 1, TUR: 1, AT: 1, EN: 1, FR: 1 };
+  langs.forEach(k => LANGS[k].codes.forEach(c => { codes[c] = 1; }));
+  const all = Object.keys(codes).join('|');
+  LANG_PREFIX = new RegExp(`^\\s*(?:[\\[(|]+\\s*[A-Za-z]{2,4}\\s*[-:]?\\s*[\\])|]+|(?:${all})\\s*[-:|★•]+)\\s*`);
+  const sp = Object.keys(codes).filter(c => SPACE_SAFE.has(c)).join('|');
+  CHAN_SPACE = new RegExp(`^(?:${sp})\\s+(?=\\S)`);
+}
+setLangs(langs);
+
+const langMiss = new Set();
+const KIND_LABEL = { live: 'Live TV', movie: 'Filmen', series: 'Serien' };
+const catLangOk = name => langs.some(k => langMatch(name, k));
+const itemLangOk = raw => langs.some(k => LANGS[k].rePre.test(String(raw || '')));
 
 /* ---------- Sender nach allgemeiner Beliebtheit ----------
    Feste Reihenfolge bekannter Sender (große Vollprogramme zuerst, dann Sport, Nachrichten, Sparten).
@@ -597,23 +688,23 @@ function groupVariants(items) {
   return out;
 }
 
-const isTurkish = name => fold(name).split(/[^a-z0-9]+/).some(w => w === 'tr' || w === 'tur' || /^(turk|tuerk|turquie)/.test(w));
 
 async function grouped(k) {
   const [cats, all] = await Promise.all([getCats(k).catch(() => []), getItems(k)]);
   if (k === 'live' && all.length && !all[0].lang) {
     // Sprache je Sender, für die Suche nach dem passenden offiziellen Logo
-    const trCats = new Set(cats.filter(c => isTurkish(c.category_name)).map(c => String(c.category_id)));
-    for (const it of all) it.lang = trCats.has(String(it.cat)) || /^\s*[\[(|]*\s*(TR|TUR)\b/.test(it.raw) ? 'tr' : 'de';
+    const catLang = {};
+    cats.forEach(c => { catLang[String(c.category_id)] = langOf(c.category_name); });
+    for (const it of all) it.lang = catLang[String(it.cat)] || itemLang(it.raw) || langs[0] || 'de';
   }
   let items = all;
-  if (langOnly) {
+  if (langs.length) {
     const ok = new Set(cats.filter(c => catLangOk(c.category_name)).map(c => String(c.category_id)));
     const f = all.filter(it => ok.has(String(it.cat)) || itemLangOk(it.raw));
     if (f.length) items = f;
     else if (all.length && !langMiss.has(k)) {
       langMiss.add(k);
-      toast(`Bei ${KIND_LABEL[k]} wurden keine deutschen oder türkischen Kategorien erkannt. Dort wird alles angezeigt.`, true);
+      toast(`Bei ${KIND_LABEL[k]} wurden keine Kategorien in deinen Sprachen erkannt. Dort wird alles angezeigt.`, true);
     }
   }
   const by = new Map();
@@ -623,11 +714,11 @@ async function grouped(k) {
     by.get(c).push(it);
   }
   const groups = cats.filter(c => by.has(String(c.category_id)))
-                     .map(c => ({ title: prettyCat(c.category_name), tr: isTurkish(c.category_name), items: by.get(String(c.category_id)) }));
-  // gleicher Name in beiden Sprachen (z. B. "Netflix"): türkische Kategorie kennzeichnen
+                     .map(c => ({ title: prettyCat(c.category_name), lang: langOf(c.category_name), items: by.get(String(c.category_id)) }));
+  // gleicher Name in mehreren Sprachen (z. B. "Netflix"): Sprache dazuschreiben, außer bei der Hauptsprache
   const count = {};
   groups.forEach(g => { count[g.title] = (count[g.title] || 0) + 1; });
-  groups.forEach(g => { if (count[g.title] > 1 && g.tr) g.title += ' · Türkisch'; });
+  groups.forEach(g => { if (count[g.title] > 1 && g.lang && g.lang !== (langs[0] || 'de')) g.title += ' · ' + LANGS[g.lang].label; });
   if (k === 'live') groups.forEach(g => { g.items = groupVariants(byPopularity(g.items)); });
   const known = new Set(cats.map(c => String(c.category_id)));
   const rest = items.filter(it => !known.has(String(it.cat)));
@@ -807,7 +898,7 @@ const SPORTS_API = 'https://www.thesportsdb.com/api/v1/json/123/';
 const UEFA = ['4480', '4481', '5071'];            // Champions League, Europa League, Conference League
 const MATCH_LEN = 2.25 * 3600e3;
 const LEAGUE_NAMES = { 'Turkish Super Lig': 'Süper Lig', 'Turkish Cup': 'Türkiye Kupası', 'German Bundesliga': 'Bundesliga' };
-let team = store.get('team', 'Galatasaray');
+let team = store.get('team', cfg ? 'Galatasaray' : '');   // bisherige Nutzer behalten ihren Verein
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const sdb = path => fetch(SPORTS_API + path).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 const stillOn = list => list.filter(m => m.ts + MATCH_LEN + 30 * 60e3 > Date.now());
@@ -892,13 +983,18 @@ async function matchChannels(m, live, all) {
   const main = info ? variants(info.channels) : [];
   const fam = info ? arr(info.family).map(x => fold(x).replace(/[^a-z0-9]/g, '')) : [];
   const family = fam.length ? live.filter(it => fam.some(x => chanKey(it.name).indexOf(x) === 0 || f(it).replace(/[^a-z0-9]/g, '').indexOf(x) >= 0)) : [];
-  const named = live.filter(it => f(it).includes(key) || (key === 'galatasaray' && /\bgs ?tv\b/.test(f(it))));
-  const usual = UEFA.indexOf(m.lid) >= 0 ? /trt ?1\b|trt ?spor|tabii|dazn|sky sport|prime video/ : /bein ?sports?|bein ?max|a ?spor\b/;
+  const CLUB_TV = { galatasaray: /\bgs ?tv\b/, fenerbahce: /\bfb ?tv\b/, besiktas: /\bbjk ?tv\b/, trabzonspor: /\bts ?tv\b/ };
+  const clubKey = Object.keys(CLUB_TV).filter(c => key.indexOf(c) >= 0)[0];
+  const named = live.filter(it => f(it).includes(key) || (clubKey && CLUB_TV[clubKey].test(f(it))));
+  // übliche Sender je Wettbewerb; das Programm des Anbieters (EPG) hat ohnehin Vorrang
+  const usual = UEFA.indexOf(m.lid) >= 0 ? /trt ?1\b|trt ?spor|tabii|dazn|sky ?sport|prime|canal\+|movistar|tnt ?sport|rtl\b|zdf|cbs/
+    : m.lid === '4339' ? /bein ?sports?|bein ?max|a ?spor\b/
+    : /sky ?sport|dazn|bein|eurosport|sport ?1\b|tnt ?sport|magenta|canal\+|movistar|a ?spor\b|trt ?spor|tabii|s ?sport|tivibu/;
   const likely = family.concat(live.filter(it => usual.test(f(it)) && family.indexOf(it) < 0));
   let hits = [];
   if (m.ts - Date.now() < 36 * 3600e3) {
     if (!epgScans[m.id] || Date.now() - epgScans[m.id].ts > 20 * 60e3) {
-      const sport = /bein|spor|sport|tivibu|trt ?1\b|\batv\b|tabii|exxen|dazn|tv ?8|sky/;
+      const sport = /bein|spor|sport|tivibu|trt ?1\b|\batv\b|tabii|exxen|dazn|tv ?8|sky|canal|movistar|tnt|magenta|eurosport|zdf|das erste|rtl/;
       const cands = main.concat(likely.filter(it => main.indexOf(it) < 0), live.filter(it => sport.test(f(it)) && likely.indexOf(it) < 0 && main.indexOf(it) < 0)).slice(0, 40);
       const out = [];
       let next = 0;
@@ -1038,7 +1134,12 @@ function refreshResumeRow() {
    2. Logo des Anbieters, 3. Sendername als Text. Das Ergebnis wird gemerkt. */
 const LOGO_CDN = 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/';
 const LOGO_DROP = new Set(['hd', 'fhd', 'uhd', '4k', '8k', 'sd', 'hevc', 'h265', 'h264', 'raw', 'backup', 'yedek', '1080p', '720p', '2160p',
-  '1080', '720', '50fps', '60fps', 'vip', 'de', 'tr', 'at', 'ger', 'tur', 'hq', 'low', 'hdr', 'orj', 'orjinal', 'original', 'alternatif']);
+  '1080', '720', '50fps', '60fps', 'vip', 'de', 'tr', 'at', 'ger', 'tur', 'hq', 'low', 'hdr', 'orj', 'orjinal', 'original', 'alternatif',
+  'uk', 'us', 'fr', 'pl', 'nl', 'ru', 'eng', 'ita', 'esp', 'pol', 'rus', 'fra', 'exyu', 'alb', 'ara', 'kur']);
+// Länderordner der Logo-Sammlung je Sprache
+const LOGO_COUNTRY = { de: [['germany', 'de']], tr: [['turkey', 'tr']], en: [['united-kingdom', 'uk'], ['united-states', 'us']],
+  fr: [['france', 'fr']], it: [['italy', 'it']], es: [['spain', 'es']], pl: [['poland', 'pl']], nl: [['netherlands', 'nl']],
+  pt: [['portugal', 'pt'], ['brazil', 'br']], ru: [['russia', 'ru']], al: [['albania', 'al']], bk: [['croatia', 'hr']] };
 const LOGO_ALIAS = { 'prosieben': 'pro-sieben', 'pro7': 'pro-sieben', 'prosieben-maxx': 'pro-sieben-maxx', 'pro7-maxx': 'pro-sieben-maxx',
   'zdfneo': 'zdf-neo', 'zdfinfo': 'zdf-info', 'n-tv': 'ntv', 'haber-turk': 'haberturk', 'gs-tv': 'galatasaray-tv', 'gstv': 'galatasaray-tv',
   'rtl-2': 'rtl-zwei', 'rtl2': 'rtl-zwei', 'sat1': 'sat-1', 'kabel1': 'kabel-eins', 'kabel-1': 'kabel-eins', 'ard': 'das-erste', 'show-tv': 'show' };
@@ -1065,9 +1166,12 @@ function logoCandidates(base, lang) {
   if (/-tv$/.test(base)) add(base.slice(0, -3)); else add(base + '-tv');
   add(base.replace(/([a-z])(\d)/g, '$1-$2'));
   if (/^dazn-\d+$/.test(base)) add('dazn');
-  const order = lang === 'tr' ? [['turkey', 'tr'], ['germany', 'de']] : [['germany', 'de'], ['turkey', 'tr']];
+  const order = (LOGO_COUNTRY[lang] || []).slice();
+  if (lang === 'de') order.push(['turkey', 'tr']);
+  if (lang === 'tr') order.push(['germany', 'de']);
+  if (!order.length) return [];                       // keine Sammlung für diese Sprache: Logo des Anbieters
   const urls = slugs.slice(0, 4).map(x => `${LOGO_CDN}${order[0][0]}/${x}-${order[0][1]}.png`);
-  urls.push(`${LOGO_CDN}${order[1][0]}/${slugs[0]}-${order[1][1]}.png`);
+  for (let i = 1; i < order.length; i++) urls.push(`${LOGO_CDN}${order[i][0]}/${slugs[0]}-${order[i][1]}.png`);
   return urls;
 }
 function channelLogo(it, onNone) {
@@ -1612,6 +1716,7 @@ $('#toastClose').onclick = () => { $('#toast').hidden = true; };
 /* ---------- Anmeldung und Menü ---------- */
 function showApp() {
   $('#login').hidden = true;
+  $('#setup').hidden = true;
   $('#main').hidden = false;
   document.body.classList.remove('auth');
   $('#avatar').textContent = ((cfg && cfg.user) || '?').slice(0, 1).toUpperCase();
@@ -1622,6 +1727,7 @@ function showLogin() {
   stopPlayback();
   $('#menu').hidden = true;
   $('#main').hidden = true;
+  $('#setup').hidden = true;
   $('#login').hidden = false;
   document.body.classList.add('auth');
   const c = cfg || {};
@@ -1629,15 +1735,33 @@ function showLogin() {
   $('#usr').value = c.user || '';
   $('#pw').value = c.pass || '';
   $('#prx').value = c.proxy || store.get('xtProxy', '') || DEFAULT_PROXY;
-  $('#prxWrap').hidden = !!HP;
+  $('#prxWrap').hidden = !!HP || APP || !DEFAULT_PROXY;
   $('#loginErr').textContent = '';
   ($('#srv').value ? $('#usr').value ? $('#pw') : $('#usr') : $('#srv')).focus();
 }
 
+// Server-Feld: normale Adresse ("server:8080", ohne http:// geht auch) oder kompletter M3U-Link
+function parseLogin(srv, user, pass) {
+  let s = String(srv || '').trim();
+  if (s && !/^https?:\/\//i.test(s)) s = 'http://' + s;
+  try {
+    const u = new URL(s);
+    const qu = u.searchParams.get('username'), qp = u.searchParams.get('password');
+    if (qu && qp) return { server: u.origin, user: qu, pass: qp };
+    return { server: u.origin, user, pass };
+  } catch (e) { return { server: s, user, pass }; }
+}
+$('#srv').addEventListener('change', () => {
+  const p = parseLogin($('#srv').value, $('#usr').value.trim(), $('#pw').value);
+  if (/username=/.test($('#srv').value) && p.user) { $('#srv').value = p.server; $('#usr').value = p.user; $('#pw').value = p.pass; }
+});
+
 $('#loginForm').onsubmit = async e => {
   e.preventDefault();
-  const c = { server: $('#srv').value.trim(), user: $('#usr').value.trim(), pass: $('#pw').value, proxy: HP ? '' : $('#prx').value.trim() };
-  if (!/^https?:\/\//.test(c.server)) { $('#loginErr').textContent = 'Server bitte mit http:// angeben.'; return; }
+  const pl = parseLogin($('#srv').value, $('#usr').value.trim(), $('#pw').value);
+  const c = { server: pl.server, user: pl.user, pass: pl.pass, proxy: HP || APP ? '' : $('#prx').value.trim() };
+  if (!/^https?:\/\/[^/]+/.test(c.server)) { $('#loginErr').textContent = 'Bitte die Server-Adresse eingeben, z. B. http://server:8080'; return; }
+  if (!c.user || !c.pass) { $('#loginErr').textContent = 'Bitte Benutzername und Passwort eingeben (oder den M3U-Link einfügen).'; return; }
   const old = cfg;
   cfg = c;
   $('#loginErr').textContent = 'Verbinde ...';
@@ -1647,7 +1771,8 @@ $('#loginForm').onsubmit = async e => {
     info = d.user_info;
     store.set('xt', cfg);
     clearCache();
-    go('home', null, 'replace');
+    if (!store.get('setupDone', false)) showSetup(true);
+    else go('home', null, 'replace');
   } catch (err) {
     cfg = old;
     $('#loginErr').textContent = 'Fehler: ' + err.message;
@@ -1662,28 +1787,7 @@ $('#avatar').onclick = e => {
   $('#menuInfo').textContent = info
     ? `Profil: ${cfg.user}\nStatus: ${info.status}\nGültig bis: ${fmtDate(info.exp_date)}\nVerbindungen: ${info.active_cons}/${info.max_connections}`
     : `Profil: ${(cfg && cfg.user) || ''}`;
-  $('#mLang').textContent = langOnly ? 'Alle Sprachen anzeigen' : 'Nur Deutsch und Türkisch anzeigen';
-  $('#mTeam').textContent = 'Lieblingsverein: ' + (team || 'keiner');
-  $('#mRes').textContent = 'Maximale Auflösung: ' + ({ 0: 'Auto', 4: '4K', 3: 'Full HD', 2: 'HD' }[maxRes] || 'Auto');
   m.querySelector('button').focus();
-};
-$('#mRes').onclick = () => {
-  const order = [0, 4, 3, 2];
-  maxRes = order[(order.indexOf(maxRes) + 1) % order.length];
-  store.set('maxRes', maxRes);
-  $('#menu').hidden = true;
-  toast('Maximale Auflösung: ' + ({ 0: 'Auto (alle)', 4: '4K', 3: 'Full HD', 2: 'HD' }[maxRes]));
-  render(current, currentArg);
-};
-$('#mTeam').onclick = () => {
-  $('#menu').hidden = true;
-  const t = prompt('Lieblingsverein (leer lassen, um die Spielanzeige auszuschalten):', team || '');
-  if (t === null) return;
-  team = t.trim();
-  store.set('team', team);
-  localStorage.removeItem('fixtures');
-  toast(team ? `Spiele von ${team} werden angezeigt.` : 'Spielanzeige ausgeschaltet.');
-  render(current, currentArg);
 };
 $('#mPrefs').onclick = () => {
   $('#menu').hidden = true;
@@ -1693,19 +1797,78 @@ $('#mPrefs').onclick = () => {
   toast('Empfehlungen zurückgesetzt.');
   render(current, currentArg);
 };
-$('#mLang').onclick = () => {
-  langOnly = !langOnly;
-  store.set('langOnly', langOnly);
-  langMiss.clear();
-  $('#menu').hidden = true;
-  toast(langOnly ? 'Es werden nur deutsche und türkische Inhalte angezeigt.' : 'Es werden alle Sprachen angezeigt.');
-  render(current, currentArg);
+/* ---------- Einstellungen (beim ersten Start und über das Menü) ---------- */
+let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto';
+const RES_OPTS = [[0, 'Automatisch'], [4, '4K'], [3, 'Full HD'], [2, 'HD']];
+const LITE_OPTS = [['auto', 'Automatisch'], ['on', 'Sparmodus an'], ['off', 'Volle Effekte']];
+function chipRow(box, opts, pressed, tap) {
+  setKids($(box), ...opts.map(o => {
+    const b = el('button', 'chip', o[1]);
+    b.type = 'button';
+    b.dataset.v = String(o[0]);
+    b.onclick = () => { tap(o[0]); syncChips(); };
+    return b;
+  }));
+  $(box).pressed = pressed;
+}
+function syncChips() {
+  ['#langChips', '#resChips', '#liteChips'].forEach(id => {
+    const box = $(id);
+    [...box.children].forEach(b => b.setAttribute('aria-pressed', box.pressed(b.dataset.v) ? 'true' : 'false'));
+  });
+}
+function showSetup(firstRun) {
+  setupFirst = !!firstRun;
+  while (overlays.length) overlays.pop()();
+  stopPlayback();
+  $('#menu').hidden = true; $('#main').hidden = true; $('#login').hidden = true; $('#setup').hidden = false;
+  document.body.classList.add('auth');
+  window.scrollTo(0, 0);
+  $('#setupTitle').textContent = firstRun ? 'Willkommen! Kurz einrichten' : 'Einstellungen';
+  $('#teamIn').value = team || '';
+  $('#teamRes').textContent = '';
+  sLangs = langs.slice(); sRes = maxRes; sLite = liteMode;
+  chipRow('#langChips', [['all', 'Alle Sprachen']].concat(LANG_KEYS.map(k => [k, LANGS[k].label])),
+    v => v === 'all' ? !sLangs.length : sLangs.indexOf(v) >= 0,
+    v => { if (v === 'all') sLangs = []; else sLangs = sLangs.indexOf(v) >= 0 ? sLangs.filter(x => x !== v) : sLangs.concat(v); });
+  chipRow('#resChips', RES_OPTS, v => +v === sRes, v => { sRes = +v; });
+  chipRow('#liteChips', LITE_OPTS, v => v === sLite, v => { sLite = v; });
+  syncChips();
+  $('#teamIn').focus();
+}
+function closeSetup() {
+  $('#setup').hidden = true;
+  go('home', null, 'replace');
+}
+$('#teamCheck').onclick = async () => {
+  const t = $('#teamIn').value.trim();
+  if (!t) { $('#teamRes').textContent = 'Kein Verein: es wird kein Spiel angezeigt.'; return; }
+  $('#teamRes').textContent = 'Suche ...';
+  try {
+    const r = ((await sdb('searchteams.php?t=' + enc(t))).teams || []).filter(x => x.strSport === 'Soccer');
+    $('#teamRes').textContent = r.length ? `Gefunden: ${r[0].strTeam} (${r[0].strLeague}, ${r[0].strCountry})`
+      : 'Nicht gefunden. Tipp: den Namen international schreiben, z. B. „Bayern Munich“ statt „Bayern München“.';
+  } catch (e) { $('#teamRes').textContent = 'Prüfung gerade nicht möglich (keine Verbindung).'; }
 };
+$('#setupForm').onsubmit = e => {
+  e.preventDefault();
+  const t = $('#teamIn').value.trim();
+  if (t !== team) { team = t; store.set('team', team); localStorage.removeItem('fixtures'); localStorage.removeItem('teamInfo'); }
+  const langChanged = sLangs.slice().sort().join() !== langs.slice().sort().join();
+  setLangs(sLangs);
+  maxRes = sRes; store.set('maxRes', maxRes);
+  liteMode = sLite; store.set('liteMode', liteMode); applyLite();
+  store.set('setupDone', true);
+  if (langChanged) { langMiss.clear(); clearCache(); }
+  toast('Einstellungen gespeichert.');
+  closeSetup();
+};
+$('#mSetup').onclick = () => showSetup(false);
 document.addEventListener('click', e => { if (!e.target.closest('#menu, #avatar')) $('#menu').hidden = true; });
 $('#mSettings').onclick = showLogin;
 $('#mRefresh').onclick = () => { $('#menu').hidden = true; clearCache(); toast('Listen werden neu geladen.'); render(current, currentArg); };
 $('#mLogout').onclick = () => {
-  if (!confirm('Abmelden und Zugangsdaten in diesem Browser löschen?')) return;
+  if (!confirm('Abmelden und Zugangsdaten auf diesem Gerät löschen?')) return;
   localStorage.removeItem('xt');
   cfg = null; info = null; clearCache();
   showLogin();
@@ -1731,12 +1894,13 @@ function layer() {
   if (modals.length) return modals[modals.length - 1];
   if (!$('#menu').hidden) return $('#menu');
   if (!$('#login').hidden) return $('#login');
+  if (!$('#setup').hidden) return $('#setup');
   return document.body;
 }
 function move(dir) {
   const root = layer();
   const list = [...root.querySelectorAll('[data-nav], button, input, select, video')]
-    .filter(e => !e.disabled && !e.classList.contains('chev') && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #toast')));
+    .filter(e => !e.disabled && !e.classList.contains('chev') && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #setup, #toast')));
   const cur = document.activeElement;
   if (!list.includes(cur)) {
     const start = root.querySelector('.btn.play, [data-nav]') || list[0];
@@ -1787,13 +1951,19 @@ document.addEventListener('keydown', e => {
   if (back) {
     if (!$('#menu').hidden) { $('#menu').hidden = true; $('#avatar').focus(); return; }
     if (overlays.length) { e.preventDefault(); history.back(); return; }
+    if (!$('#setup').hidden) { if (k === 'Escape' && !setupFirst) closeSetup(); return; }
     if (t.id === 'q') { t.value = ''; t.blur(); if (current === 'search') history.back(); return; }
     if (k !== 'Escape' && !$('#main').hidden && current !== 'home') { e.preventDefault(); history.back(); }
     return;
   }
   const dir = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[k];
   if (dir) {
-    if (typing && (dir === 'left' || dir === 'right')) return;
+    if (typing && (dir === 'left' || dir === 'right')) {
+      // im Textfeld: erst am Textende (rechts) bzw. -anfang (links) zum nächsten Element springen
+      let atStart = true, atEnd = true;
+      try { atStart = t.selectionStart === 0 && t.selectionEnd === 0; atEnd = t.selectionStart === t.value.length && t.selectionEnd === t.value.length; } catch (er) {}
+      if (!(dir === 'right' && atEnd) && !(dir === 'left' && atStart)) return;
+    }
     if (t.tagName === 'SELECT' && (dir === 'up' || dir === 'down')) return;
     e.preventDefault();
     move(dir);
@@ -1809,6 +1979,7 @@ window.__appBack = function () {
   if (!$('#menu').hidden) { $('#menu').hidden = true; $('#avatar').focus(); return true; }
   if ($('#q') === document.activeElement && $('#q').value) { $('#q').value = ''; $('#q').blur(); if (current === 'search') history.back(); return true; }
   if (overlays.length) { history.back(); return true; }
+  if (!$('#setup').hidden) { if (!setupFirst) closeSetup(); return true; }
   if (!$('#login').hidden) return false;
   if (current !== 'home') { history.back(); return true; }
   return false;
@@ -1816,10 +1987,10 @@ window.__appBack = function () {
 
 /* ---------- Start ---------- */
 if (cfg) {
-  showApp();
-  if (HP) cfg.proxy = '';
+  if (HP || APP) cfg.proxy = '';
   history.replaceState({ name: 'home', id: 0 }, '');
-  render('home', null);
+  if (!store.get('setupDone', false)) showSetup(true);
+  else { showApp(); render('home', null); }
   api('').then(d => {
     if (!d.user_info || d.user_info.auth != 1) throw new Error('Anmeldung abgelehnt');
     info = d.user_info;
