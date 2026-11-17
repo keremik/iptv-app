@@ -447,17 +447,20 @@ function pretty(name) {
   if (m && m.index > 0) { yr = m[1]; title = title.slice(0, m.index).trim(); }
   return { title: title || raw, year: yr };
 }
-const chanName = name => String(name || '').replace(LANG_PREFIX, '').trim() || String(name || '');
-// Kategorie: Kürzel weg, GROSSBUCHSTABEN lesbar machen, türkische Kategorien kennzeichnen
+const chanName = name => String(name || '').replace(LANG_PREFIX, '').replace(/^(?:DE|GER|TR|TUR|AT)\s+(?=\S)/, '').trim() || String(name || '');
+// Trenn-Einträge des Anbieters wie "-- TURKIYE --" oder "##### DE #####" sind keine Sender
+const SEP = '[-–—=#*_~•●★▬■◆►◄|.:+<>]';
+const PLACEHOLDER = new RegExp(`^\\s*${SEP}{2,}.*${SEP}{2,}\\s*$|^[^A-Za-z0-9\\u00c0-\\u024f]*$`);
+const isPlaceholder = name => PLACEHOLDER.test(String(name || ''));
+// Kategorie: Sprachkürzel weg ("TR Haber" -> "Haber"), GROSSBUCHSTABEN lesbar machen
+const KEEP_UPPER = new Set(['HEVC', 'H265', 'H264', 'UEFA', 'NFL', 'NBA', 'WWE', 'UFC', 'MOTO', 'XXL']);
 function prettyCat(name) {
   const raw = String(name || '');
-  const lead = fold(raw).split(/[^a-z0-9]+/).filter(Boolean)[0];
-  let t = raw.replace(LANG_PREFIX, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
+  let t = raw.replace(LANG_PREFIX, '').replace(/^(?:DE|GER|TR|TUR|AT)\s+(?=\S)/, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
   if (t === t.toUpperCase()) {
-    t = t.replace(/[^\s\/|&+\-]+/g, w => w.length <= 3 || /\d/.test(w) ? w : w.charAt(0) + w.slice(1).replace(/İ/g, 'i').toLowerCase());
+    t = t.replace(/[^\s\/|&+\-]+/g, w => w.length <= 3 || /\d/.test(w) || KEEP_UPPER.has(w) ? w : w.charAt(0) + w.slice(1).replace(/İ/g, 'i').toLowerCase());
   }
-  if ((lead === 'tr' || lead === 'tur') && t !== raw) t += ' · Türkisch';
-  return t;
+  return t.replace(/\bTurkiye\b/g, 'Türkiye').replace(/\bTurk\b/g, 'Türk');
 }
 
 function norm(k, x) {
@@ -470,7 +473,7 @@ function norm(k, x) {
     rating: x.rating, year: year(x.releaseDate || x.release_date) || p.year, backdrop: first(x.backdrop_path), added: +x.last_modified || 0 };
 }
 const getCats = k => once('c' + k, () => api(CAT[k][0]).then(arr));
-const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => arr(a).map(x => norm(k, x))));
+const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => arr(a).filter(x => !isPlaceholder(x.name)).map(x => norm(k, x))));
 const getVodInfo = id => once('v' + id, () => api('get_vod_info', '&vod_id=' + enc(id)));
 const getSeriesInfo = id => once('s' + id, () => api('get_series_info', '&series_id=' + enc(id)));
 const clearCache = () => { for (const k in memo) delete memo[k]; };
@@ -492,6 +495,38 @@ function catLangOk(name) {
 }
 // Einzelner Titel mit Kürzel vorn, z. B. "(DE-) Film", "TR: Show TV", "|DE| RTL"
 const itemLangOk = name => /^\s*[\[(|]*\s*(DE|GER|TR|TUR|AT)\s*[-\])|:★•]/.test(String(name || ''));
+
+/* ---------- Sender nach allgemeiner Beliebtheit ----------
+   Feste Reihenfolge bekannter Sender (große Vollprogramme zuerst, dann Sport, Nachrichten, Sparten).
+   Ein * am Ende passt auf alle Sender, die so beginnen. Unbekannte Sender folgen in der Reihenfolge des Anbieters. */
+const POPULAR = [
+  // Türkei
+  'trt1', 'atv', 'show', 'kanald', 'star', 'now', 'fox', 'tv8', 'kanal7', 'tv85', 'teve2', 'beyaz', 'a2', '360', 'tv100',
+  'beinsports1', 'beinsports2', 'beinsports3', 'beinsports4', 'beinsports5', 'beinsportsmax1', 'beinsportsmax2', 'beinsportsmax*', 'beinsportshaber', 'beinsports*',
+  'trtspor', 'trtsporyildiz', 'aspor', 'ssport', 'ssport2', 'ssportplus', 'ssport*', 'tivibuspor1', 'tivibuspor2', 'tivibuspor3', 'tivibuspor4', 'tivibuspor*',
+  'sports', 'tabiispor*', 'exxen*', 'galatasaray', 'fenerbahce', 'fb', 'bjk', 'eurosport1', 'eurosport2', 'smartspor*',
+  'trthaber', 'cnnturk', 'ntv', 'haberturk', 'ahaber', 'halk', 'sozcu', 'tele1', 'tgrthaber', 'haberglobal', 'ulke', 'krt', 'tvnet', 'bloomberght', 'apara',
+  'trt2', 'trtbelgesel', 'trtcocuk', 'trtmuzik', 'trtturk', 'trtavaz', 'trtworld', 'trt*', 'tlc', 'dmax', 'nationalgeographic*', 'natgeo*', 'discovery*',
+  'cartoonnetwork', 'minikacocuk', 'minikago', 'minika*', 'disney*', 'nickelodeon', 'nick*', 'eurod', 'eurostar', 'atvavrupa', 'showturk', 'kanal7avrupa', 'tv8int',
+  'kralpop', 'powerturk', 'numberone*', 'dreamturk',
+  // Deutschland
+  'daserste', 'zdf', 'rtl', 'sat1', 'prosieben', 'vox', 'kabeleins', 'rtlzwei', 'arte', '3sat', 'zdfneo', 'zdfinfo', 'superrtl', 'nitro', 'rtlnitro', 'sixx',
+  'prosiebenmaxx', 'sat1gold', 'kabeleinsdoku', 'tele5', 'welt', 'phoenix', 'tagesschau24', 'n24doku', 'kika', 'toggo',
+  'sport1', 'skysportbundesliga1', 'skysportbundesliga*', 'skysport1', 'skysport2', 'skysporttopevent', 'skysportnews', 'skysport*', 'dazn1', 'dazn2', 'dazn*',
+  'skycinema*', 'skyone', 'skyatlantic', 'sky*', 'wdr*', 'ndr*', 'brfernsehen', 'br', 'swr*', 'mdr*', 'hr*', 'rbb*', 'one', 'ardalpha',
+];
+const POP_EXACT = {}, POP_PREFIX = [];
+POPULAR.forEach((e, i) => { if (e.slice(-1) === '*') POP_PREFIX.push([e.slice(0, -1), i]); else if (!(e in POP_EXACT)) POP_EXACT[e] = i; });
+function popRank(it) {
+  if (it.rank !== undefined) return it.rank;
+  const base = logoBase(it.name);
+  let k = (LOGO_ALIAS[base] || base).replace(/-/g, '');
+  if (/tv$/.test(k) && k.length >= 5) k = k.slice(0, -2);            // "showtv" -> "show", aber "atv" und "ntv" bleiben
+  let r = k in POP_EXACT ? POP_EXACT[k] : Infinity;
+  if (r === Infinity) for (const p of POP_PREFIX) if (k.indexOf(p[0]) === 0) { r = p[1]; break; }
+  return (it.rank = r);
+}
+const byPopularity = items => items.map((it, i) => [it, i]).sort((a, b) => popRank(a[0]) - popRank(b[0]) || a[1] - b[1]).map(x => x[0]);
 
 const isTurkish = name => fold(name).split(/[^a-z0-9]+/).some(w => w === 'tr' || w === 'tur' || /^(turk|tuerk|turquie)/.test(w));
 
@@ -519,7 +554,12 @@ async function grouped(k) {
     by.get(c).push(it);
   }
   const groups = cats.filter(c => by.has(String(c.category_id)))
-                     .map(c => ({ title: prettyCat(c.category_name), items: by.get(String(c.category_id)) }));
+                     .map(c => ({ title: prettyCat(c.category_name), tr: isTurkish(c.category_name), items: by.get(String(c.category_id)) }));
+  // gleicher Name in beiden Sprachen (z. B. "Netflix"): türkische Kategorie kennzeichnen
+  const count = {};
+  groups.forEach(g => { count[g.title] = (count[g.title] || 0) + 1; });
+  groups.forEach(g => { if (count[g.title] > 1 && g.tr) g.title += ' · Türkisch'; });
+  if (k === 'live') groups.forEach(g => { g.items = byPopularity(g.items); });
   const known = new Set(cats.map(c => String(c.category_id)));
   const rest = items.filter(it => !known.has(String(it.cat)));
   if (rest.length) groups.push({ title: 'Weitere', items: rest });
