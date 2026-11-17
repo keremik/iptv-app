@@ -183,7 +183,7 @@
           padding-top: max(16px, env(safe-area-inset-top)); background: linear-gradient(rgba(0,0,0,.85), transparent); transition: opacity .4s; }
   #player.idle .pbar { opacity: 0; pointer-events: none; }
   #player.idle { cursor: none; }
-  .pbar .iconbtn { font-size: 28px; }
+  .pbar .iconbtn { font-size: 32px; padding: 2px 10px; }
   .pbar .ttl { flex: 1; min-width: 0; }
   .pbar .ttl b { display: block; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pbar .ttl small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -317,12 +317,12 @@
   <div class="pbar">
     <button class="iconbtn" id="pClose" aria-label="Zurück">←</button>
     <div class="ttl"><b id="pTitle"></b><small id="pSub"></small></div>
-    <button class="iconbtn" id="pPrev" aria-label="Vorheriger Sender" hidden>⏮</button>
-    <button class="iconbtn" id="pNext" aria-label="Nächster Sender" hidden>⏭</button>
+    <button class="iconbtn" id="pPrev" aria-label="Vorheriger Sender" hidden>«</button>
+    <button class="iconbtn" id="pNext" aria-label="Nächster Sender" hidden>»</button>
   </div>
 </div>
 
-<div id="toast" role="status" hidden><span id="toastText"></span><span id="toastActs"></span><button class="iconbtn" id="toastClose" aria-label="Schließen">✕</button></div>
+<div id="toast" role="status" hidden><span id="toastText"></span><span id="toastActs"></span><button class="iconbtn" id="toastClose" aria-label="Schließen">×</button></div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js"></script>
@@ -1149,7 +1149,7 @@ function hero(it) {
   fillMeta(meta, it);
   const acts = el('div', 'actions');
   acts.append(button('btn play', '▶  Abspielen', () => playItem(it)),
-              button('btn more', 'ⓘ  Weitere Infos', () => showDetails(it)));
+              button('btn more', 'Weitere Infos', () => showDetails(it)));
   c.append(el('h1', null, it.name), meta, plot, acts);
   h.append(bg, c);
   if (it.kind === 'movie') {
@@ -1171,7 +1171,7 @@ async function showDetails(it) {
   const top = el('div', 'top');
   setBg(top, it.backdrop || it.img);
   const hc = el('div', 'hero-content'), acts = el('div', 'actions');
-  const fav = button('btn round', isFav(it) ? '✓' : '+', () => { fav.textContent = toggleFav(it) ? '✓' : '+'; });
+  const fav = button('btn round', isFav(it) ? '−' : '+', () => { fav.textContent = toggleFav(it) ? '−' : '+'; });
   fav.title = 'Meine Liste'; fav.setAttribute('aria-label', 'Meine Liste');
   const play = button('btn play', '▶  Abspielen', () => playItem(it));
   acts.append(play, fav);
@@ -1182,7 +1182,7 @@ async function showDetails(it) {
   fillMeta(meta, it);
   left.append(meta, plot);
   body.append(left, side);
-  const close = button('btn round close', '✕', () => history.back());
+  const close = button('btn round close', '×', () => history.back());
   close.setAttribute('aria-label', 'Schließen');
   const eps = el('div', 'episodes');
   m.append(close, top, body, eps);
@@ -1289,13 +1289,18 @@ function closePlayer() {
 }
 
 // Wiedergabe beenden, damit der Anbieter die Verbindung freigibt (meist nur 1 erlaubt)
-function stopPlayback() {
+let streamSession = 0;
+function resetPlayers() {
   if (hls) { hls.destroy(); hls = null; }
   if (tsPlayer) { try { tsPlayer.destroy(); } catch (e) {} tsPlayer = null; }
-  video.onerror = video.onended = null;
+  video.onerror = video.onended = video.onplaying = null;
   video.pause();
   video.removeAttribute('src');
   video.load();
+}
+function stopPlayback() {
+  streamSession++;                       // laufende Wiederholversuche abbrechen
+  resetPlayers();
 }
 
 // VLC (kostenlose App) spielt auch mkv/avi. Es holt den Stream über den Proxy,
@@ -1307,50 +1312,103 @@ const vlcActions = direct => [
 ];
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
 
+// Wiedergabearten für Live-Sender. Nicht jedes Gerät kann jede: iPhone nur HLS, Fernseher oft nur eine der anderen.
+// Die App probiert sie der Reihe nach und merkt sich, welche auf diesem Gerät funktioniert.
+const MODE_LABEL = { hls: 'HLS direkt', mpegts: 'MPEG-TS', hlsjs: 'HLS per Skript', ts: 'TS direkt', file: 'Datei' };
+function liveModes() {
+  if (isIOS) return ['hls'];
+  const can = { mpegts: !!(window.mpegts && mpegts.isSupported()), hlsjs: !!(window.Hls && Hls.isSupported()), hls: true, ts: true };
+  const order = (nativeHls() ? ['hls', 'mpegts', 'hlsjs', 'ts'] : ['mpegts', 'hlsjs', 'ts', 'hls']).filter(m => can[m]);
+  const saved = store.get('liveMode', '');
+  return order.indexOf(saved) > 0 ? [saved].concat(order.filter(m => m !== saved)) : order;
+}
+
 function startStream(src, live, name) {
   stopPlayback();
-  const useTs = live && !nativeHls() && window.mpegts && mpegts.isSupported();
-  const url = live ? (useTs ? src.ts : src.m3u8) : src.url;
+  const session = streamSession;
   const vlc = isIOS && src.direct ? vlcActions(src.direct) : null;
-  const fail = why => { toast(`Wiedergabe-Fehler: ${name} (${why})\nPrüfe Verbindung ...`, true, vlc); diagnose(url, name, why, vlc); };
-  if (useTs) {
-    // Live-Sender als .ts-Stream (Desktop-Browser)
-    tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url }, { enableStashBuffer: false, liveBufferLatencyChasing: true });
-    tsPlayer.attachMediaElement(video);
-    tsPlayer.on(mpegts.Events.ERROR, (type, detail, data) => {
-      const extra = data && (data.code || data.msg) ? `, ${data.code == null ? '' : data.code} ${data.msg || ''}`.trim() : '';
-      fail(`${type}/${detail}${extra}`);
-    });
-    tsPlayer.load();
-    Promise.resolve(tsPlayer.play()).catch(() => {});
-  } else if (url.includes('.m3u8') && !nativeHls() && window.Hls && Hls.isSupported()) {
-    hls = new Hls();
-    hls.loadSource(url);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
-    hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) fail(d.details); });
-  } else {
-    // iPhone/iPad/Safari: eingebauter Player (HLS, mp4)
-    video.onerror = () => {
-      const fmt = (url.match(/\.(\w+)(?:$|%3F|\?|&)/i) || [])[1] || '';
-      const hint = /mkv|avi/i.test(fmt) ? ` – Format .${fmt} kann dieser Browser nicht abspielen` : '';
-      fail(`Code ${video.error ? video.error.code : '?'}${hint}`);
+  const modes = live ? liveModes() : ['file'];
+  const tried = [];
+
+  const attempt = i => {
+    if (session !== streamSession) return;
+    resetPlayers();
+    const mode = modes[i];
+    const url = mode === 'file' ? src.url : mode === 'mpegts' || mode === 'ts' ? src.ts : src.m3u8;
+    let settled = false, timer = 0;
+    const fail = why => {
+      if (settled || session !== streamSession) return;
+      settled = true;
+      clearTimeout(timer);
+      tried.push(live ? `${MODE_LABEL[mode]} (${why})` : why);
+      if (i + 1 < modes.length) {
+        toast(`Wiedergabeart ${i + 2} von ${modes.length} wird versucht ...`);
+        setTimeout(() => attempt(i + 1), 1200);      // kurze Pause, damit der Anbieter die Verbindung freigibt
+        return;
+      }
+      resetPlayers();
+      const why2 = tried.join(', ');
+      toast(`Wiedergabe-Fehler: ${name}\n${live ? 'Versucht: ' : ''}${why2}\nPrüfe Verbindung ...`, true, vlc);
+      diagnose(url, name, (live ? 'Versucht: ' : '') + why2, vlc);
     };
-    video.src = url;
-    video.play().catch(() => {});
-  }
+    video.onplaying = () => {
+      settled = true;
+      clearTimeout(timer);
+      if (live && session === streamSession) store.set('liveMode', mode);
+    };
+    // bleibt das Bild 20 Sekunden aus, nächste Wiedergabeart (nicht bei der letzten: dort lieber weiter warten)
+    if (live && i + 1 < modes.length) timer = setTimeout(() => fail('kein Bild nach 20 s'), 20000);
+
+    if (mode === 'mpegts') {
+      tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url }, { enableStashBuffer: false, liveBufferLatencyChasing: true });
+      tsPlayer.attachMediaElement(video);
+      tsPlayer.on(mpegts.Events.ERROR, (type, detail, data) => {
+        const extra = data && (data.code || data.msg) ? `, ${data.code == null ? '' : data.code} ${data.msg || ''}`.trim() : '';
+        fail(`${type}/${detail}${extra}`);
+      });
+      tsPlayer.load();
+      Promise.resolve(tsPlayer.play()).catch(() => {});
+    } else if (mode === 'hlsjs' || (mode === 'file' && url.includes('.m3u8') && !nativeHls() && window.Hls && Hls.isSupported())) {
+      hls = new Hls();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) fail(d.details); });
+    } else {
+      // eingebauter Player des Geräts (iPhone/iPad/Safari: HLS und mp4, Fernseher oft auch TS und mkv)
+      video.onerror = () => {
+        const fmt = (url.match(/\.(\w+)(?:$|%3F|\?|&)/i) || [])[1] || '';
+        const hint = /mkv|avi/i.test(fmt) ? ` – Format .${fmt} kann dieser Browser nicht abspielen` : '';
+        fail(`Code ${video.error ? video.error.code : '?'}${hint}`);
+      };
+      video.src = url;
+      video.play().catch(() => {});
+    }
+  };
+  attempt(0);
 }
 
 // Fragt den Proxy, was beim Anbieter wirklich passiert, und zeigt es an
 async function diagnose(url, name, why, action) {
-  if (!url.includes('?u=')) return toast(`Wiedergabe-Fehler: ${name} (${why})\nKein Proxy eingetragen.`, true, action);
+  const head = `Wiedergabe-Fehler: ${name}\n${why}\n`;
+  if (!url.includes('?u=')) return toast(head + 'Kein Proxy eingetragen.', true, action);
+  let text;
   try {
     const r = await fetch(url + '&debug=1');
     const t = await r.text();
-    toast(`Wiedergabe-Fehler: ${name} (${why})\n` + (r.ok ? t : `Proxy antwortet HTTP ${r.status}: ${t.slice(0, 300)}`), true, action);
+    text = r.ok ? t : `Proxy antwortet HTTP ${r.status}: ${t.slice(0, 300)}`;
   } catch (e) {
-    toast(`Wiedergabe-Fehler: ${name} (${why})\nProxy nicht erreichbar: ${e.message}`, true, action);
+    text = 'Proxy nicht erreichbar: ' + e.message;
   }
+  // Viele Anbieter erlauben nur eine Verbindung gleichzeitig und lehnen weitere mit 403 ab
+  try {
+    const u = (await api('')).user_info || {};
+    if (u.max_connections) {
+      text += `\nVerbindungen beim Anbieter: ${u.active_cons} von ${u.max_connections} belegt.`;
+      if (+u.active_cons >= +u.max_connections) text += ' Läuft noch ein Stream auf einem anderen Gerät? Dort erst beenden.';
+    }
+  } catch (e) {}
+  toast(head + text, true, action);
 }
 
 function playLive(it, list) {
