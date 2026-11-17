@@ -120,7 +120,15 @@ const CAT = {
   series: ['get_series_categories', 'get_series'],
 };
 
-let cfg = JSON.parse(localStorage.getItem('xt') || 'null');  // { server, user, pass }
+let cfg = JSON.parse(localStorage.getItem('xt') || 'null');  // { server, user, pass, proxy }
+
+// Link vom Heim-Proxy (QR-Code): ...?proxy=https://xyz.trycloudflare.com übernimmt die Proxy-Adresse
+const linkProxy = new URLSearchParams(location.search).get('proxy');
+if (linkProxy && /^https:\/\//.test(linkProxy)) {
+  if (cfg) { cfg.proxy = linkProxy; localStorage.setItem('xt', JSON.stringify(cfg)); }
+  else localStorage.setItem('xtProxy', linkProxy);
+  history.replaceState(null, '', location.pathname);
+}
 let info = null;          // user_info aus der API
 let kind = null;          // 'live' | 'movie' | 'series'
 let cats = [], items = [];
@@ -145,7 +153,18 @@ function show(id) {
   ['home', 'login', 'section'].forEach(s => $(s).hidden = s !== id);
 }
 
+// Wiedergabe beenden, damit der Anbieter die Verbindung freigibt (meist nur 1 erlaubt)
+function stopPlayback() {
+  const v = $('video');
+  if (hls) { hls.destroy(); hls = null; }
+  if (tsPlayer) { tsPlayer.destroy(); tsPlayer = null; }
+  v.pause();
+  v.removeAttribute('src');
+  v.load();
+}
+
 function showHome() {
+  stopPlayback();
   show('home');
   if (info) {
     $('exp').textContent = 'Ablauf: ' + fmtDate(info.exp_date);
@@ -155,11 +174,12 @@ function showHome() {
 }
 
 function showLogin() {
+  stopPlayback();
   show('login');
   $('srv').value = cfg?.server || '';
   $('usr').value = cfg?.user || '';
   $('pw').value = cfg?.pass || '';
-  $('prx').value = cfg?.proxy || '';
+  $('prx').value = cfg?.proxy || localStorage.getItem('xtProxy') || '';
   $('srv').focus();
 }
 
@@ -211,7 +231,10 @@ async function loadItems() {
 }
 
 function toItem(x) {
-  if (kind === 'live')  return { name: x.name, ts: true, url: px(`${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.ts`) };
+  if (kind === 'live') {
+    const live = ext => px(`${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.${ext}`);
+    return { name: x.name, live: true, ts: live('ts'), hlsUrl: live('m3u8') };
+  }
   if (kind === 'movie') return { name: x.name, url: px(`${base()}/movie/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.${x.container_extension || 'mp4'}`) };
   return { name: x.name, seriesId: x.series_id };
 }
@@ -237,13 +260,17 @@ async function openSeries(it) {
   }
 }
 
+// iPhone/iPad/Safari spielen HLS (.m3u8) selbst ab, wie AVPlayer in nativen Apps
+const nativeHls = () => !!$('video').canPlayType('application/vnd.apple.mpegurl');
+
 function play(it) {
   const v = $('video');
-  if (hls) { hls.destroy(); hls = null; }
-  if (tsPlayer) { tsPlayer.destroy(); tsPlayer = null; }
-  if (it.ts && window.mpegts && mpegts.isSupported()) {
-    // Live-Sender als .ts-Stream
-    tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: it.url });
+  stopPlayback();
+  v.onerror = null;
+  if (it.live) it.url = nativeHls() || !(window.mpegts && mpegts.isSupported()) ? it.hlsUrl : it.ts;
+  if (it.live && it.url === it.ts) {
+    // Live-Sender als .ts-Stream (Desktop-Browser)
+    tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: it.url }, { enableStashBuffer: false });
     tsPlayer.attachMediaElement(v);
     tsPlayer.on(mpegts.Events.ERROR, (type, detail, data) => {
       const extra = data && (data.code || data.msg) ? `, ${data.code ?? ''} ${data.msg ?? ''}`.trimEnd() : '';
@@ -252,13 +279,19 @@ function play(it) {
     });
     tsPlayer.load();
     tsPlayer.play();
-  } else if (it.url.includes('.m3u8') && window.Hls && Hls.isSupported()) {
+  } else if (it.url.includes('.m3u8') && !nativeHls() && window.Hls && Hls.isSupported()) {
     hls = new Hls();
     hls.loadSource(it.url);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
     hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) { setStatus('Stream-Fehler: ' + it.name + ' (' + d.details + ')'); diagnose(it, d.details); } });
   } else {
+    v.onerror = () => {
+      const fmt = (it.url.match(/\.(\w+)(?:$|%3F|\?)/i) || [])[1] || '';
+      const hint = /mkv|avi/i.test(fmt) ? `\nFormat .${fmt} kann Safari nicht abspielen (nur mp4/m3u8).` : '';
+      setStatus(`Stream-Fehler: ${it.name} (Code ${v.error?.code ?? '?'})${hint}\nPrüfe Verbindung ...`);
+      diagnose(it, 'Code ' + (v.error?.code ?? '?') + hint);
+    };
     v.src = it.url;
     v.play().catch(() => {});
   }
