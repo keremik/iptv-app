@@ -294,6 +294,7 @@
   <button id="mSettings">Zugangsdaten ändern</button>
   <button id="mLang"></button>
   <button id="mTeam"></button>
+  <button id="mRes"></button>
   <button id="mPrefs">Empfehlungen zurücksetzen</button>
   <button id="mRefresh">Listen neu laden</button>
   <button id="mLogout">Abmelden</button>
@@ -550,6 +551,13 @@ function quality(raw) {
   return { label: [res[0]].concat(extra).filter(Boolean).join(' · '), rank: res[1] - (has('backup', 'yedek') ? 0.4 : 0) };
 }
 const byQuality = items => items.map((it, i) => [it, i]).sort((a, b) => quality(b[0].raw).rank - quality(a[0].raw).rank || a[1] - b[1]).map(x => x[0]);
+// Maximale Auflösung: auf schwachen Geräten (z. B. 1080p-Stick) zu hohe Varianten ausblenden.
+let maxRes = store.get('maxRes', 0);   // 0 = Auto, sonst 4=4K, 3=Full HD, 2=HD
+function capVariants(list) {
+  if (!maxRes) return list;
+  const ok = list.filter(it => quality(it.raw || it.name).rank <= maxRes + 0.5);
+  return ok.length ? ok : list;        // nie eine Gruppe ganz leeren
+}
 
 function popRank(it) {
   if (it.rank !== undefined) return it.rank;
@@ -568,7 +576,7 @@ function groupVariants(items) {
     groups.get(k).push(it);
   });
   const out = [];
-  groups.forEach(g => byQuality(g).forEach(it => out.push(it)));
+  groups.forEach(g => byQuality(capVariants(g)).forEach(it => out.push(it)));
   return out;
 }
 
@@ -860,7 +868,7 @@ async function matchChannels(m, live, all) {
   const info = await researchFor(m);
   const variants = names => {
     const keys = arr(names).map(chanKey);
-    const pick = pool => byQuality(pool.filter(it => keys.indexOf(chanKey(it.name)) >= 0));
+    const pick = pool => byQuality(capVariants(pool.filter(it => keys.indexOf(chanKey(it.name)) >= 0)));
     const inLang = pick(live);
     return inLang.length ? inLang : pick(all);
   };
@@ -1639,7 +1647,16 @@ $('#avatar').onclick = e => {
     : `Profil: ${(cfg && cfg.user) || ''}`;
   $('#mLang').textContent = langOnly ? 'Alle Sprachen anzeigen' : 'Nur Deutsch und Türkisch anzeigen';
   $('#mTeam').textContent = 'Lieblingsverein: ' + (team || 'keiner');
+  $('#mRes').textContent = 'Maximale Auflösung: ' + ({ 0: 'Auto', 4: '4K', 3: 'Full HD', 2: 'HD' }[maxRes] || 'Auto');
   m.querySelector('button').focus();
+};
+$('#mRes').onclick = () => {
+  const order = [0, 4, 3, 2];
+  maxRes = order[(order.indexOf(maxRes) + 1) % order.length];
+  store.set('maxRes', maxRes);
+  $('#menu').hidden = true;
+  toast('Maximale Auflösung: ' + ({ 0: 'Auto (alle)', 4: '4K', 3: 'Full HD', 2: 'HD' }[maxRes]));
+  render(current, currentArg);
 };
 $('#mTeam').onclick = () => {
   $('#menu').hidden = true;
