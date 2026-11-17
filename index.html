@@ -109,6 +109,7 @@
 
 <!-- hls.js lokal im selben Ordner ablegen -->
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const enc = encodeURIComponent;
@@ -126,6 +127,7 @@ let cats = [], items = [];
 let catIdx = 0, itemIdx = 0, column = 'channels';
 let cache = {};
 let hls = null;
+let tsPlayer = null;
 
 const base = () => cfg.server.replace(/\/$/, '');
 // Alle Anfragen gehen über den Proxy, damit der Browser keine http-Verbindung blockiert
@@ -209,7 +211,7 @@ async function loadItems() {
 }
 
 function toItem(x) {
-  if (kind === 'live')  return { name: x.name, url: px(`${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.m3u8`) };
+  if (kind === 'live')  return { name: x.name, ts: true, url: px(`${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.ts`) };
   if (kind === 'movie') return { name: x.name, url: px(`${base()}/movie/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.${x.container_extension || 'mp4'}`) };
   return { name: x.name, seriesId: x.series_id };
 }
@@ -238,12 +240,20 @@ async function openSeries(it) {
 function play(it) {
   const v = $('video');
   if (hls) { hls.destroy(); hls = null; }
-  if (it.url.includes('.m3u8') && window.Hls && Hls.isSupported()) {
+  if (tsPlayer) { tsPlayer.destroy(); tsPlayer = null; }
+  if (it.ts && window.mpegts && mpegts.isSupported()) {
+    // Live-Sender als .ts-Stream
+    tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: it.url });
+    tsPlayer.attachMediaElement(v);
+    tsPlayer.on(mpegts.Events.ERROR, (t, d) => setStatus('Stream-Fehler: ' + it.name + ' (' + t + ')'));
+    tsPlayer.load();
+    tsPlayer.play();
+  } else if (it.url.includes('.m3u8') && window.Hls && Hls.isSupported()) {
     hls = new Hls();
     hls.loadSource(it.url);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
-    hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) setStatus('Stream-Fehler: ' + it.name); });
+    hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) setStatus('Stream-Fehler: ' + it.name + ' (' + d.details + ')'); });
   } else {
     v.src = it.url;
     v.play().catch(() => {});
