@@ -334,6 +334,33 @@ const $ = s => document.querySelector(s);
 const enc = encodeURIComponent;
 const HP = window.HOME_PROXY || null;       // gesetzt, wenn die App vom Heim-Proxy kommt
 const DEFAULT_PROXY = 'https://iptv-proxy.keremirmak02.workers.dev';   // für die Nutzung ohne PC
+
+// Läuft die Oberfläche in der Android-App (Stick)? Dann spielt ein nativer Player (ExoPlayer) ab.
+const APP = !!(window.NativePlayer && window.NativePlayer.play);
+let appPos = 0, appDur = 0;
+const curTime = () => APP ? appPos : video.currentTime;
+const curDur = () => APP ? appDur : video.duration;
+
+// Der Stream geht in der App direkt an den Anbieter (ohne Proxy), das übernimmt der native Player.
+function nativeStart(src, live, name) {
+  stopPlayback();
+  let startSec = 0;
+  if (!live && nowPlaying && nowPlaying.seek) { startSec = nowPlaying.seek; nowPlaying.seek = 0; }
+  appPos = 0; appDur = 0;
+  const primary = live ? src.rawM3u8 : src.rawUrl;
+  const alt = live ? src.rawTs : '';
+  try { window.NativePlayer.play(primary, !!live, name || '', Math.floor(startSec) || 0, alt || ''); }
+  catch (e) { toast('Player-Fehler: ' + e.message, true); }
+}
+// Rückmeldungen des nativen Players
+window.__player = {
+  time: function (pos, dur) { appPos = +pos || 0; appDur = +dur || 0; saveProgress(false); },
+  ended: function () { var h = nowPlaying && nowPlaying.endHandler; if (h) h(); },
+  back: function () { closePlayer(); },
+  error: function (msg) { toast('Wiedergabe-Fehler: ' + (msg || ''), true); },
+  switch: function (step) { switchChannel(+step); },
+};
+function nativeSubtitle(t) { if (APP && window.NativePlayer.subtitle) { try { window.NativePlayer.subtitle(t || ''); } catch (e) {} } }
 const ROW_MAX = 30;
 
 // Ältere Browser (Fernseher) erkennen: kein Flexbox-"gap", kein :focus-visible
@@ -809,7 +836,7 @@ const fmtClock = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit',
 const leagueName = n => LEAGUE_NAMES[n] || n || '';
 
 // Recherchierte Sender je Spiel. Die Datei broadcast.json im Repo wird vor den Spielen per Recherche aktualisiert.
-const BROADCAST_URL = 'https://keremik.github.io/iptv-app/broadcast.json';
+const BROADCAST_URL = 'broadcast.json';
 let broadcastMemo = null;
 function loadBroadcast() {
   if (broadcastMemo && Date.now() - broadcastMemo.ts < 30 * 60e3) return broadcastMemo.p;
@@ -1270,6 +1297,7 @@ function playItem(it) {
 }
 
 function openPlayer(title, sub) {
+  if (APP) return;                 // der native Player zeigt sich selbst
   if ($('#player').hidden) {
     $('#player').hidden = false;
     document.body.style.overflow = 'hidden';
@@ -1303,6 +1331,7 @@ function resetPlayers() {
 function stopPlayback() {
   streamSession++;                       // laufende Wiederholversuche abbrechen
   resetPlayers();
+  if (APP) { try { window.NativePlayer.stop(); } catch (e) {} }
 }
 
 // VLC (kostenlose App) spielt auch mkv/avi. Es holt den Stream über den Proxy,
@@ -1326,6 +1355,7 @@ function liveModes() {
 }
 
 function startStream(src, live, name) {
+  if (APP) return nativeStart(src, live, name);
   stopPlayback();
   const session = streamSession;
   const vlc = isIOS && src.direct ? vlcActions(src.direct) : null;
@@ -1422,7 +1452,7 @@ function playLive(it, list) {
   openPlayer(it.name, '');
   $('#pPrev').hidden = $('#pNext').hidden = list.length < 2;
   const raw = ext => `${base()}/live/${cred()}/${it.id}.${ext}`;
-  startStream({ ts: px(raw('ts')), m3u8: px(raw('m3u8')), direct: abs(px(raw('ts'))) }, true, it.name);
+  startStream({ ts: px(raw('ts')), m3u8: px(raw('m3u8')), rawTs: raw('ts'), rawM3u8: raw('m3u8'), direct: abs(px(raw('ts'))) }, true, it.name);
   loadEpg(it);
 }
 
@@ -1438,8 +1468,10 @@ async function loadEpg(it) {
     const d = await api('get_short_epg', `&stream_id=${enc(it.id)}&limit=2`);
     if (!nowPlaying || nowPlaying.it !== it) return;
     const l = arr(d.epg_listings).slice(0, 2);
-    $('#pSub').textContent = l.map((x, i) =>
+    const sub = l.map((x, i) =>
       `${i ? 'Danach' : 'Jetzt'}: ${b64(x.title)} (${fmtTime(x.start_timestamp)}–${fmtTime(x.stop_timestamp)})`).join('   ·   ');
+    $('#pSub').textContent = sub;
+    nativeSubtitle(sub);
   } catch (e) {}
 }
 
@@ -1457,11 +1489,13 @@ function playVod(e, at) {
   nowPlaying = { live: false, e, seek: at > 5 ? at : 0 };
   openPlayer(e.name, e.sub);
   $('#pPrev').hidden = $('#pNext').hidden = true;
-  startStream({ url: px(vodRaw(e)), direct: abs(px(vodRaw(e))) }, false, e.name);
-  video.onended = () => {
+  startStream({ url: px(vodRaw(e)), rawUrl: vodRaw(e), direct: abs(px(vodRaw(e))) }, false, e.name);
+  const onEnd = () => {
     const r = resumes(); delete r[e.key]; store.set('resume', r);
     if (e.kind === 'ep') nextEpisode(e);
   };
+  if (nowPlaying) nowPlaying.endHandler = onEnd;
+  video.onended = onEnd;
 }
 
 function playMovie(it) {
@@ -1502,7 +1536,7 @@ async function nextEpisode(e) {
 function saveProgress(force) {
   const np = nowPlaying;
   if (!np || np.live) return;
-  const t = video.currentTime, d = video.duration;
+  const t = curTime(), d = curDur();
   if (!isFinite(d) || d <= 0) return;
   const now = Date.now();
   if (!force && now - lastSave < 5000) return;
@@ -1733,6 +1767,17 @@ document.addEventListener('keydown', e => {
     t.click();
   }
 });
+
+// Android-App: die Zurück-Taste der Fernbedienung steuert die Web-Navigation.
+// Rückgabe true = es gab etwas zum Zurückgehen; false = wir sind auf der Startseite (App darf schließen).
+window.__appBack = function () {
+  if (!$('#menu').hidden) { $('#menu').hidden = true; $('#avatar').focus(); return true; }
+  if ($('#q') === document.activeElement && $('#q').value) { $('#q').value = ''; $('#q').blur(); if (current === 'search') history.back(); return true; }
+  if (overlays.length) { history.back(); return true; }
+  if (!$('#login').hidden) return false;
+  if (current !== 'home') { history.back(); return true; }
+  return false;
+};
 
 /* ---------- Start ---------- */
 if (cfg) {
