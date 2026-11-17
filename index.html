@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#141414">
 <title>IPTV Player</title>
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
 <!--HOME_PROXY-->
 <style>
   :root {
@@ -42,20 +44,21 @@
           min-width: 230px; padding: 6px 0; }
   #menu .info { padding: 10px 16px; color: var(--muted); font-size: 13px; line-height: 1.6; border-bottom: 1px solid #333; white-space: pre-line; }
   #menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 11px 16px; cursor: pointer; font-size: 14px; }
-  #menu button:hover, #menu button:focus-visible { text-decoration: underline; outline: none; }
+  #menu button:hover { text-decoration: underline; }
+  #menu button:focus-visible { text-decoration: underline; outline: none; }
   body.auth .links, body.auth .tools { display: none; }
 
   /* Titelbild */
   .hero { position: relative; height: 56.25vw; max-height: 82vh; min-height: 420px; display: flex; align-items: flex-end; padding: 0 var(--pad) 14vh; }
-  .hero-bg { position: absolute; inset: 0; background: #000 center 20% / cover no-repeat; }
-  .hero::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  .hero-bg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: #000 center 20% / cover no-repeat; }
+  .hero::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none;
                  background: linear-gradient(to top, var(--bg), rgba(20,20,20,0) 38%), linear-gradient(77deg, rgba(0,0,0,.8), rgba(0,0,0,.1) 70%); }
   .hero-content { position: relative; z-index: 1; max-width: 600px; }
-  .hero h1, .modal h1 { font-size: clamp(30px, 4.6vw, 64px); line-height: 1.05; margin: 0 0 14px; text-shadow: 2px 2px 6px rgba(0,0,0,.5); }
+  .hero h1, .modal h1 { font-size: 52px; font-size: clamp(30px, 4.6vw, 64px); line-height: 1.05; margin: 0 0 14px; text-shadow: 2px 2px 6px rgba(0,0,0,.5); }
   .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; color: #ddd; font-size: 15px; margin-bottom: 10px; }
   .meta .rate { color: #46d369; font-weight: 700; }
   .meta .tag { border: 1px solid rgba(255,255,255,.4); padding: 0 6px; font-size: 13px; }
-  .plot { font-size: clamp(14px, 1.3vw, 18px); line-height: 1.45; margin: 0; text-shadow: 1px 1px 3px rgba(0,0,0,.6);
+  .plot { font-size: 17px; font-size: clamp(14px, 1.3vw, 18px); line-height: 1.45; margin: 0; text-shadow: 1px 1px 3px rgba(0,0,0,.6);
           display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 4px;
@@ -72,10 +75,10 @@
   /* Reihen */
   #rows { position: relative; z-index: 2; margin-top: -9vh; padding-bottom: 60px; }
   #main.plain #rows { margin-top: 0; padding-top: 96px; }
-  .page-title { font-size: clamp(24px, 2.6vw, 40px); margin: 0 var(--pad) 20px; }
+  .page-title { font-size: 34px; font-size: clamp(24px, 2.6vw, 40px); margin: 0 var(--pad) 20px; }
   .row { margin-bottom: 2.6vw; }
   .row h2, .section-title { display: flex; gap: 14px; align-items: baseline; margin: 0 var(--pad) 4px;
-            font-size: clamp(16px, 1.4vw, 22px); font-weight: 700; color: #e5e5e5; }
+            font-size: 20px; font-size: clamp(16px, 1.4vw, 22px); font-weight: 700; color: #e5e5e5; }
   .row h2 button { background: none; border: 0; padding: 0; color: var(--link); font-size: 13px; font-weight: 700; cursor: pointer; }
   .slider { display: flex; gap: var(--gap); overflow-x: auto; padding: 12px var(--pad) 22px; scroll-padding: 0 var(--pad);
             scroll-snap-type: x proximity; scrollbar-width: none; }
@@ -89,14 +92,14 @@
   @media (hover: none) and (pointer: coarse) { .chev { display: none; } }
   .card { flex: 0 0 auto; position: relative; border-radius: 4px; overflow: hidden; background: var(--card); cursor: pointer;
           scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease; }
-  .card.poster { width: clamp(112px, 13.5vw, 210px); aspect-ratio: 2 / 3; }
-  .card.wide { width: clamp(170px, 18.5vw, 300px); aspect-ratio: 16 / 9; }
+  .card.poster { width: 13.5vw; width: clamp(112px, 13.5vw, 210px); aspect-ratio: 2 / 3; }
+  .card.wide { width: 18.5vw; width: clamp(170px, 18.5vw, 300px); aspect-ratio: 16 / 9; }
   .card img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .card.logo { background: linear-gradient(135deg, #333, #1c1c1c); }
   .card.logo img { object-fit: contain; padding: 12% 22% 22%; }
   .card .label { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 9px 8px; font-size: 13px; font-weight: 700;
                  background: linear-gradient(transparent, rgba(0,0,0,.9)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+  .card .fallback { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; text-align: center;
                     padding: 12px; font-weight: 700; font-size: 15px; background: linear-gradient(160deg, #3a3a3a, #1a1a1a); }
   .card.logo .fallback { background: none; }
   .card.logo .fallback ~ .label { display: none; }
@@ -107,9 +110,11 @@
   @media (hover: hover) { .card:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 10px 24px rgba(0,0,0,.75); } }
   .card:focus-visible { transform: scale(1.08); z-index: 3; outline: 3px solid #fff; outline-offset: 0; }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(112px, 13.5vw, 210px), 1fr));
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(clamp(112px, 13.5vw, 210px), 1fr));
           gap: 18px var(--gap); padding: 12px var(--pad) 30px; }
-  .grid.wide { grid-template-columns: repeat(auto-fill, minmax(clamp(170px, 18.5vw, 300px), 1fr)); }
+  .grid.wide { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+               grid-template-columns: repeat(auto-fill, minmax(clamp(170px, 18.5vw, 300px), 1fr)); }
   .grid .card { width: auto; }
   .empty { color: var(--muted); margin: 30px var(--pad); font-size: 16px; }
   .spinner { width: 52px; height: 52px; margin: 40vh auto; border: 4px solid #333; border-top-color: var(--accent);
@@ -118,14 +123,14 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Details */
-  .modal-wrap { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.7); overflow-y: auto; display: flex;
+  .modal-wrap { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 40; background: rgba(0,0,0,.7); overflow-y: auto; display: flex;
                 justify-content: center; padding: 32px 12px; }
-  .modal { position: relative; width: min(860px, 100%); height: max-content; background: var(--surface); border-radius: 8px;
+  .modal { position: relative; width: 100%; max-width: 860px; height: max-content; background: var(--surface); border-radius: 8px;
            overflow: hidden; box-shadow: 0 12px 48px #000; }
   .modal .top { position: relative; aspect-ratio: 16 / 9; max-height: 60vh; background: #000 center 20% / cover no-repeat; display: flex; align-items: flex-end; }
-  .modal .top::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, var(--surface), transparent 55%); }
+  .modal .top::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: linear-gradient(to top, var(--surface), transparent 55%); }
   .modal .top .hero-content { padding: 0 44px 34px; }
-  .modal h1 { font-size: clamp(26px, 3.6vw, 44px); }
+  .modal h1 { font-size: 40px; font-size: clamp(26px, 3.6vw, 44px); }
   .modal .close { position: absolute; top: 14px; right: 14px; z-index: 2; width: 38px; height: 38px; background: var(--surface); border: 0; font-size: 18px; }
   .modal .body { display: grid; grid-template-columns: 2fr 1fr; gap: 28px; padding: 6px 44px 30px; }
   .modal .body p { line-height: 1.5; margin: 0; }
@@ -137,7 +142,8 @@
   .ephead h3 { font-size: 24px; margin: 0; }
   select { background: #242424; border: 1px solid #4d4d4d; border-radius: 4px; padding: 9px 12px; font-size: 16px; }
   .ep { display: flex; gap: 16px; align-items: center; padding: 16px; border-bottom: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
-  .ep:hover, .ep:focus-visible { background: #333; }
+  .ep:hover { background: #333; }
+  .ep:focus-visible { background: #333; }
   .ep .n { font-size: 24px; color: #d2d2d2; width: 32px; text-align: center; flex: none; }
   .ep .thumb { position: relative; width: 140px; aspect-ratio: 16 / 9; flex: none; border-radius: 4px; overflow: hidden; background: #333; }
   .ep .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -150,7 +156,7 @@
              display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* Player */
-  #player { position: fixed; inset: 0; z-index: 60; background: #000; }
+  #player { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; background: #000; }
   #player video { width: 100%; height: 100%; display: block; background: #000; }
   .pbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 16px; padding: 16px 22px;
           padding-top: max(16px, env(safe-area-inset-top)); background: linear-gradient(rgba(0,0,0,.85), transparent); transition: opacity .4s; }
@@ -162,8 +168,8 @@
   .pbar .ttl small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* Hinweise */
-  #toast { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 80;
-           width: max-content; max-width: min(680px, 92vw); background: #232323; border-left: 4px solid var(--accent);
+  #toast { position: fixed; left: 50%; bottom: 24px; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 80;
+           width: max-content; max-width: 92vw; max-width: min(680px, 92vw); background: #232323; border-left: 4px solid var(--accent);
            padding: 12px 44px 12px 16px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
            box-shadow: 0 8px 28px #000; border-radius: 4px; }
   #toast button { position: absolute; top: 6px; right: 6px; }
@@ -173,7 +179,7 @@
   /* Anmeldung */
   #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 96px 16px 40px;
            background: radial-gradient(ellipse at top, #3b0d12, var(--bg) 65%); }
-  .login-card { width: min(450px, 100%); background: rgba(0,0,0,.75); padding: 48px 56px; border-radius: 6px; display: flex; flex-direction: column; gap: 14px; }
+  .login-card { width: 100%; max-width: 450px; background: rgba(0,0,0,.75); padding: 48px 56px; border-radius: 6px; display: flex; flex-direction: column; gap: 14px; }
   .login-card h1 { margin: 0 0 8px; font-size: 32px; }
   .login-card label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
   .login-card input { padding: 15px 16px; font-size: 16px; background: #333; border: 0; border-radius: 4px; }
@@ -206,6 +212,35 @@
     .ep .thumb { width: 110px; }
     .login-card { padding: 32px 22px; }
   }
+
+  /* ---- Ältere Browser (z. B. Fernseher mit Chrome 77): Ersatz für neuere CSS-Funktionen ---- */
+  @supports not (aspect-ratio: 1 / 1) {
+    .card.poster::before { content: ''; display: block; padding-top: 150%; }
+    .card.wide::before { content: ''; display: block; padding-top: 56.25%; }
+    .card img { position: absolute; top: 0; left: 0; }
+    .modal .top::before { content: ''; padding-top: 56.25%; }
+    .ep .thumb { height: 79px; }
+    @media (max-width: 760px) { .ep .thumb { height: 62px; } }
+  }
+  /* kein :focus-visible: Auswahl mit der Fernbedienung trotzdem sichtbar machen */
+  .no-fv :focus { outline: 3px solid #fff; outline-offset: 2px; }
+  .no-fv .card:focus { transform: scale(1.08); z-index: 3; outline-offset: 0; }
+  .no-fv .ep:focus { background: #333; }
+  .no-fv #menu button:focus { text-decoration: underline; outline: none; }
+  /* kein "gap" in Flexbox: Abstände über Ränder */
+  .no-gap nav > * + * { margin-left: 28px; }
+  .no-gap .links > * + * { margin-left: 20px; }
+  .no-gap .tools > * + * { margin-left: 14px; }
+  .no-gap .meta > * { margin-right: 12px; }
+  .no-gap .actions > * { margin-right: 10px; }
+  .no-gap .row h2 button { margin-left: 14px; }
+  .no-gap .slider > * + * { margin-left: var(--gap); }
+  .no-gap .ep > * + * { margin-left: 16px; }
+  .no-gap .ep .t b span + span { margin-left: 10px; }
+  .no-gap .pbar > * + * { margin-left: 16px; }
+  .no-gap .login-card > * + * { margin-top: 14px; }
+  .no-gap .login-card label > * + * { margin-top: 6px; }
+  .no-gap #toastActs > * { margin-right: 8px; }
 </style>
 </head>
 <body class="auth">
@@ -273,6 +308,26 @@ const HP = window.HOME_PROXY || null;       // gesetzt, wenn die App vom Heim-Pr
 const DEFAULT_PROXY = 'https://iptv-proxy.keremirmak02.workers.dev';   // für die Nutzung ohne PC
 const ROW_MAX = 30;
 
+// Ältere Browser (Fernseher) erkennen: kein Flexbox-"gap", kein :focus-visible
+(function () {
+  const root = document.documentElement;
+  const f = document.createElement('div');
+  f.style.cssText = 'display:flex;gap:10px;position:absolute;visibility:hidden';
+  f.innerHTML = '<i style="width:10px;height:1px"></i><i style="width:10px;height:1px"></i>';
+  document.body.appendChild(f);
+  if (f.offsetWidth < 30) root.classList.add('no-gap');
+  f.remove();
+  try { document.querySelector(':focus-visible'); } catch (e) { root.classList.add('no-fv'); }
+})();
+
+// Ersatz für neuere Funktionen, die in älteren Browsern fehlen
+function setKids(node, ...kids) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+  node.append(...kids);
+}
+const settle = ps => Promise.all(ps.map(p => p.then(
+  value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }))));
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -287,15 +342,15 @@ function button(cls, text, onClick) {
 }
 function navify(e) { e.tabIndex = 0; e.dataset.nav = ''; e.setAttribute('role', 'button'); return e; }
 const store = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
 };
 const first = x => Array.isArray(x) ? x[0] : x;
 const year = s => (String(s || '').match(/\d{4}/) || [''])[0];
 const fold = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const fmtDate = ts => ts ? new Date(Number(ts) * 1000).toLocaleDateString('de-DE') : '–';
 const fmtTime = ts => new Date(Number(ts) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-const b64 = s => { try { return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0))); } catch { return s || ''; } };
+const b64 = s => { try { return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0))); } catch (e) { return s || ''; } };
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 /* ---------- Zugangsdaten ---------- */
@@ -317,7 +372,7 @@ const cred = () => `${enc(cfg.user)}/${enc(cfg.pass)}`;
 const px = url => HP ? `/?u=${enc(url)}` : cfg.proxy ? `${cfg.proxy.replace(/\/$/, '')}/?u=${enc(url)}` : url;
 
 // http-Bilder kann eine https-Seite nicht laden, daher über den Proxy
-const imgSrc = u => !u ? '' : (!HP && location.protocol === 'https:' && /^http:/i.test(u) && cfg?.proxy)
+const imgSrc = u => !u ? '' : (!HP && location.protocol === 'https:' && /^http:/i.test(u) && cfg && cfg.proxy)
   ? `${cfg.proxy.replace(/\/$/, '')}/?img=${enc(u)}` : u;
 
 function api(action, extra = '') {
@@ -336,7 +391,7 @@ const CAT = {
   series: ['get_series_categories', 'get_series'],
 };
 const memo = {};
-const once = (key, fn) => memo[key] ??= fn().catch(e => { delete memo[key]; throw e; });
+const once = (key, fn) => memo[key] || (memo[key] = fn().catch(e => { delete memo[key]; throw e; }));
 const arr = a => Array.isArray(a) ? a : [];
 
 function norm(k, x) {
@@ -432,7 +487,7 @@ function go(name, arg, mode = 'push') {
 window.addEventListener('popstate', e => {
   if (overlays.length) { overlays.pop()(); return; }
   const s = e.state;
-  if (s?.name && cfg) render(s.name, viewArgs.get(s.id) ?? null);
+  if (s && s.name && cfg) render(s.name, viewArgs.get(s.id) || null);
 });
 
 function pushOverlay(close) {
@@ -448,13 +503,13 @@ async function render(name, arg) {
   showApp();
   const main = $('#main');
   main.className = 'plain';
-  main.replaceChildren(el('div', 'spinner'));
+  setKids(main, el('div', 'spinner'));
   if (name !== 'search') window.scrollTo(0, 0);
   try {
     const v = await VIEWS[name](arg);
     if (token !== viewToken) return;
     main.className = v.hero ? '' : 'plain';
-    main.replaceChildren();
+    setKids(main);
     if (v.hero) main.append(v.hero);
     const rows = el('div'); rows.id = 'rows';
     main.append(rows);
@@ -464,7 +519,7 @@ async function render(name, arg) {
       if (s.title) rows.append(el('h2', 'section-title', s.title));
       lazyGrid(rows, s.items);
     }
-    const defs = (v.rows || []).filter(d => d && d.items?.length);
+    const defs = (v.rows || []).filter(d => d && d.items && d.items.length);
     lazyRows(rows, defs);
     if (!defs.length && !(v.sections || []).some(s => s.items.length)) rows.append(el('p', 'empty', v.empty || 'Hier gibt es noch nichts.'));
   } catch (e) {
@@ -472,13 +527,13 @@ async function render(name, arg) {
     main.className = 'plain';
     const p = el('p', 'empty', 'Fehler beim Laden: ' + e.message);
     p.style.paddingTop = '110px';
-    main.replaceChildren(p);
+    setKids(main, p);
   }
 }
 
 const VIEWS = {
   async home() {
-    const res = await Promise.allSettled(['movie', 'series', 'live'].map(grouped));
+    const res = await settle(['movie', 'series', 'live'].map(grouped));
     if (res.every(r => r.status === 'rejected')) throw res[0].reason;
     const [M, S, L] = res.map(r => r.status === 'fulfilled' ? r.value : { items: [], groups: [] });
     const rows = [resumeRow(), favRow(),
@@ -510,10 +565,10 @@ const VIEWS = {
              empty: 'Noch nichts gespeichert. In den Details eines Films oder einer Serie auf „+“ tippen.' };
   },
   async grid(a) {
-    return { title: a?.title || '', sections: [{ items: a?.items || [] }] };
+    return { title: (a && a.title) || '', sections: [{ items: (a && a.items) || [] }] };
   },
   async search(q) {
-    const [m, s, l] = (await Promise.allSettled(['movie', 'series', 'live'].map(k => grouped(k).then(g => g.items))))
+    const [m, s, l] = (await settle(['movie', 'series', 'live'].map(k => grouped(k).then(g => g.items))))
       .map(r => r.status === 'fulfilled' ? r.value : []);
     const n = fold(q);
     const hit = items => items.filter(it => fold(it.name).includes(n)).slice(0, 60);
@@ -574,7 +629,7 @@ function buildRow(d) {
   const showAll = () => go('grid', { title: d.title, items: d.items });
   if (more) h.append(button(null, 'Alle anzeigen ›', showAll));
   const s = el('div', 'slider');
-  for (const it of d.items.slice(0, ROW_MAX)) s.append(card(it, d.cardOpts?.(it), d.items));
+  for (const it of d.items.slice(0, ROW_MAX)) s.append(card(it, d.cardOpts && d.cardOpts(it), d.items));
   if (more) {
     const m = navify(el('div', 'card more-card ' + (d.items[0].kind === 'live' ? 'wide' : 'poster'), `Alle ${d.items.length} ›`));
     m.onclick = showAll;
@@ -609,7 +664,7 @@ function lazyRows(container, defs) {
 }
 
 function lazyGrid(container, items) {
-  const g = el('div', 'grid' + (items[0]?.kind === 'live' ? ' wide' : ''));
+  const g = el('div', 'grid' + (items[0] && items[0].kind === 'live' ? ' wide' : ''));
   const sentinel = el('div');
   container.append(g, sentinel);
   let i = 0;
@@ -630,7 +685,7 @@ function setBg(node, url) {
 }
 
 function fillMeta(meta, d) {
-  meta.replaceChildren();
+  setKids(meta);
   const r = parseFloat(d.rating);
   if (r > 0) meta.append(el('span', 'rate', '★ ' + (r > 10 ? r / 10 : r).toFixed(1)));
   if (d.year) meta.append(el('span', null, d.year));
@@ -688,16 +743,16 @@ async function showDetails(it) {
   wrap.onclick = e => { if (e.target === wrap) history.back(); };
   document.body.append(wrap);
   document.body.style.overflow = 'hidden';
-  pushOverlay(() => { wrap.remove(); document.body.style.overflow = ''; prev?.focus?.({ preventScroll: true }); });
+  pushOverlay(() => { wrap.remove(); document.body.style.overflow = ''; if (prev && prev.focus) prev.focus({ preventScroll: true }); });
   play.focus({ preventScroll: true });
 
-  const sideInfo = pairs => side.replaceChildren(...pairs.filter(p => p[1]).map(([k, v]) => {
+  const sideInfo = pairs => setKids(side, ...pairs.filter(p => p[1]).map(([k, v]) => {
     const d = el('div'); d.append(el('b', null, k + ': '), String(v)); return d;
   }));
   try {
     if (it.kind === 'movie') {
       const d = await getVodInfo(it.id), i = d.info || {};
-      if (d.movie_data?.container_extension) it.ext = d.movie_data.container_extension;
+      if (d.movie_data && d.movie_data.container_extension) it.ext = d.movie_data.container_extension;
       setBg(top, first(i.backdrop_path));
       plot.textContent = i.plot || i.description || it.plot || '';
       fillMeta(meta, { ...it, year: year(i.releasedate) || it.year, rating: i.rating || it.rating, genre: i.genre, duration: i.duration });
@@ -713,13 +768,13 @@ async function showDetails(it) {
       renderEpisodes(eps, it, d, seasons);
     }
   } catch (e) {
-    eps.replaceChildren();
+    setKids(eps);
     if (!plot.textContent) plot.textContent = 'Details konnten nicht geladen werden (' + e.message + ').';
   }
 }
 
 function renderEpisodes(box, series, d, seasons) {
-  box.replaceChildren();
+  setKids(box);
   if (!seasons.length) { box.append(el('p', 'empty', 'Keine Folgen gefunden.')); return; }
   const head = el('div', 'ephead'), sel = el('select'), list = el('div');
   head.append(el('h3', null, 'Folgen'));
@@ -728,17 +783,18 @@ function renderEpisodes(box, series, d, seasons) {
   if (seasons.length > 1) head.append(sel);
   const res = resumes();
   const show = s => {
-    list.replaceChildren();
+    setKids(list);
     d.episodes[s].forEach((ep, idx) => {
       const row = navify(el('div', 'ep'));
       const thumb = el('div', 'thumb');
-      const src = ep.info?.movie_image || series.img;
+      const inf = ep.info || {};
+      const src = inf.movie_image || series.img;
       if (src) { const im = new Image(); im.loading = 'lazy'; im.alt = ''; im.referrerPolicy = 'no-referrer'; im.src = imgSrc(src); im.onerror = () => im.remove(); thumb.append(im); }
       const r = res['e' + ep.id];
       if (r) { const b = el('div', 'bar'), i = el('i'); i.style.width = Math.min(100, r.t / r.d * 100) + '%'; b.append(i); thumb.append(b); }
       const t = el('div', 't'), b = el('b');
-      b.append(el('span', null, ep.title || `Folge ${ep.episode_num || idx + 1}`), el('span', null, ep.info?.duration || ''));
-      t.append(b, el('p', null, ep.info?.plot || ''));
+      b.append(el('span', null, ep.title || `Folge ${ep.episode_num || idx + 1}`), el('span', null, inf.duration || ''));
+      t.append(b, el('p', null, inf.plot || ''));
       row.append(el('span', 'n', String(ep.episode_num || idx + 1)), thumb, t);
       row.onclick = () => playEpisode(series, ep, s);
       list.append(row);
@@ -787,7 +843,7 @@ function closePlayer() {
 // Wiedergabe beenden, damit der Anbieter die Verbindung freigibt (meist nur 1 erlaubt)
 function stopPlayback() {
   if (hls) { hls.destroy(); hls = null; }
-  if (tsPlayer) { try { tsPlayer.destroy(); } catch {} tsPlayer = null; }
+  if (tsPlayer) { try { tsPlayer.destroy(); } catch (e) {} tsPlayer = null; }
   video.onerror = video.onended = null;
   video.pause();
   video.removeAttribute('src');
@@ -814,7 +870,7 @@ function startStream(src, live, name) {
     tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url }, { enableStashBuffer: false, liveBufferLatencyChasing: true });
     tsPlayer.attachMediaElement(video);
     tsPlayer.on(mpegts.Events.ERROR, (type, detail, data) => {
-      const extra = data && (data.code || data.msg) ? `, ${data.code ?? ''} ${data.msg ?? ''}`.trimEnd() : '';
+      const extra = data && (data.code || data.msg) ? `, ${data.code == null ? '' : data.code} ${data.msg || ''}`.trim() : '';
       fail(`${type}/${detail}${extra}`);
     });
     tsPlayer.load();
@@ -830,7 +886,7 @@ function startStream(src, live, name) {
     video.onerror = () => {
       const fmt = (url.match(/\.(\w+)(?:$|%3F|\?|&)/i) || [])[1] || '';
       const hint = /mkv|avi/i.test(fmt) ? ` – Format .${fmt} kann dieser Browser nicht abspielen` : '';
-      fail(`Code ${video.error?.code ?? '?'}${hint}`);
+      fail(`Code ${video.error ? video.error.code : '?'}${hint}`);
     };
     video.src = url;
     video.play().catch(() => {});
@@ -862,7 +918,7 @@ function playLive(it, list) {
 
 function switchChannel(step) {
   const np = nowPlaying;
-  if (!np?.live || np.list.length < 2) return;
+  if (!np || !np.live || np.list.length < 2) return;
   const idx = (np.idx + step + np.list.length) % np.list.length;
   playLive(np.list[idx], np.list);
 }
@@ -870,11 +926,11 @@ function switchChannel(step) {
 async function loadEpg(it) {
   try {
     const d = await api('get_short_epg', `&stream_id=${enc(it.id)}&limit=2`);
-    if (nowPlaying?.it !== it) return;
+    if (!nowPlaying || nowPlaying.it !== it) return;
     const l = arr(d.epg_listings).slice(0, 2);
     $('#pSub').textContent = l.map((x, i) =>
       `${i ? 'Danach' : 'Jetzt'}: ${b64(x.title)} (${fmtTime(x.start_timestamp)}–${fmtTime(x.stop_timestamp)})`).join('   ·   ');
-  } catch {}
+  } catch (e) {}
 }
 
 const vodRaw = e => `${base()}/${e.kind === 'movie' ? 'movie' : 'series'}/${cred()}/${e.id}.${e.ext || 'mp4'}`;
@@ -898,14 +954,14 @@ function playVod(e, at) {
 
 function playMovie(it) {
   const e = { key: 'm' + it.id, kind: 'movie', id: it.id, ext: it.ext || 'mp4', name: it.name, img: it.img };
-  playVod(e, resumeOf(e.key)?.t);
+  playVod(e, (resumeOf(e.key) || {}).t);
 }
 
 function playEpisode(series, ep, season) {
   const e = { key: 'e' + ep.id, kind: 'ep', id: ep.id, ext: ep.container_extension || 'mp4', name: series.name,
               sub: `S${season} F${ep.episode_num || ''} · ${ep.title || ''}`.replace(/ · $/, ''), img: series.img,
               seriesId: series.id, season };
-  playVod(e, resumeOf(e.key)?.t);
+  playVod(e, (resumeOf(e.key) || {}).t);
 }
 
 async function playSeriesStart(it) {
@@ -924,11 +980,11 @@ async function nextEpisode(e) {
     const d = await getSeriesInfo(e.seriesId);
     const all = Object.keys(d.episodes || {}).sort((a, b) => a - b).flatMap(s => d.episodes[s].map(ep => ({ ep, s })));
     const i = all.findIndex(x => String(x.ep.id) === String(e.id));
-    if (i >= 0 && all[i + 1] && nowPlaying?.e === e) {
+    if (i >= 0 && all[i + 1] && nowPlaying && nowPlaying.e === e) {
       toast('Nächste Folge ...');
       playEpisode({ id: e.seriesId, name: e.name, img: e.img }, all[i + 1].ep, all[i + 1].s);
     }
-  } catch {}
+  } catch (e) {}
 }
 
 function saveProgress(force) {
@@ -950,7 +1006,7 @@ function saveProgress(force) {
 video.addEventListener('timeupdate', () => saveProgress(false));
 video.addEventListener('pause', () => saveProgress(true));
 video.addEventListener('loadedmetadata', () => {
-  if (nowPlaying?.seek) { try { video.currentTime = nowPlaying.seek; } catch {} nowPlaying.seek = 0; }
+  if (nowPlaying && nowPlaying.seek) { try { video.currentTime = nowPlaying.seek; } catch (e) {} nowPlaying.seek = 0; }
 });
 
 function wake() {
@@ -967,7 +1023,7 @@ $('#pNext').onclick = () => switchChannel(1);
 let toastTimer = 0;
 function toast(msg, sticky, action) {
   $('#toastText').textContent = msg;
-  $('#toastActs').replaceChildren(...[].concat(action || []).map((a, i) => {
+  setKids($('#toastActs'), ...[].concat(action || []).map((a, i) => {
     const l = el('a', 'btn ' + (i ? 'more' : 'play'), a.label);
     l.href = a.href;
     if (/^https:/.test(a.href)) { l.target = '_blank'; l.rel = 'noopener'; }
@@ -984,7 +1040,7 @@ function showApp() {
   $('#login').hidden = true;
   $('#main').hidden = false;
   document.body.classList.remove('auth');
-  $('#avatar').textContent = (cfg?.user || '?').slice(0, 1).toUpperCase();
+  $('#avatar').textContent = ((cfg && cfg.user) || '?').slice(0, 1).toUpperCase();
 }
 
 function showLogin() {
@@ -994,10 +1050,11 @@ function showLogin() {
   $('#main').hidden = true;
   $('#login').hidden = false;
   document.body.classList.add('auth');
-  $('#srv').value = cfg?.server || HP?.upstream || '';
-  $('#usr').value = cfg?.user || '';
-  $('#pw').value = cfg?.pass || '';
-  $('#prx').value = cfg?.proxy || store.get('xtProxy', '') || DEFAULT_PROXY;
+  const c = cfg || {};
+  $('#srv').value = c.server || (HP && HP.upstream) || '';
+  $('#usr').value = c.user || '';
+  $('#pw').value = c.pass || '';
+  $('#prx').value = c.proxy || store.get('xtProxy', '') || DEFAULT_PROXY;
   $('#prxWrap').hidden = !!HP;
   $('#loginErr').textContent = '';
   ($('#srv').value ? $('#usr').value ? $('#pw') : $('#usr') : $('#srv')).focus();
@@ -1030,7 +1087,7 @@ $('#avatar').onclick = e => {
   if (m.hidden) return;
   $('#menuInfo').textContent = info
     ? `Profil: ${cfg.user}\nStatus: ${info.status}\nGültig bis: ${fmtDate(info.exp_date)}\nVerbindungen: ${info.active_cons}/${info.max_connections}`
-    : `Profil: ${cfg?.user || ''}`;
+    : `Profil: ${(cfg && cfg.user) || ''}`;
   $('#mLang').textContent = langOnly ? 'Alle Sprachen anzeigen' : 'Nur Deutsch und Türkisch anzeigen';
   m.querySelector('button').focus();
 };
@@ -1081,8 +1138,7 @@ function move(dir) {
   const cur = document.activeElement;
   if (!list.includes(cur)) {
     const start = root.querySelector('.btn.play, [data-nav]') || list[0];
-    start?.focus();
-    start?.scrollIntoView({ block: 'center', inline: 'nearest' });
+    if (start) { start.focus(); start.scrollIntoView({ block: 'center', inline: 'nearest' }); }
     return;
   }
   const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
@@ -1107,8 +1163,12 @@ function move(dir) {
   else best.scrollIntoView({ block: dir === 'up' || dir === 'down' ? 'center' : 'nearest', inline: 'nearest', behavior: 'smooth' });
 }
 
+// Fernbedienungen melden Tasten teils nur als Zahlencode
+const KEYCODES = { 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown', 13: 'Enter', 27: 'Escape', 8: 'Backspace',
+                   461: 'GoBack', 10009: 'GoBack', 33: 'PageUp', 34: 'PageDown', 427: 'ChannelUp', 428: 'ChannelDown' };
+
 document.addEventListener('keydown', e => {
-  const t = e.target, k = e.key;
+  const t = e.target, k = e.key && e.key !== 'Unidentified' ? e.key : (KEYCODES[e.keyCode] || '');
   const typing = t.tagName === 'INPUT';
   const back = k === 'Escape' || k === 'GoBack' || k === 'BrowserBack' || (k === 'Backspace' && !typing);
 
@@ -1117,7 +1177,7 @@ document.addEventListener('keydown', e => {
     if (back) { e.preventDefault(); history.back(); }
     else if (k === 'PageUp' || k === 'ChannelUp') { e.preventDefault(); switchChannel(-1); }
     else if (k === 'PageDown' || k === 'ChannelDown') { e.preventDefault(); switchChannel(1); }
-    else if ((k === 'ArrowUp' || k === 'ArrowDown') && t === video && nowPlaying?.live) { e.preventDefault(); switchChannel(k === 'ArrowUp' ? -1 : 1); }
+    else if ((k === 'ArrowUp' || k === 'ArrowDown') && t === video && nowPlaying && nowPlaying.live) { e.preventDefault(); switchChannel(k === 'ArrowUp' ? -1 : 1); }
     else if (k === 'Enter' && t === video) { e.preventDefault(); video.paused ? video.play() : video.pause(); }
     return;
   }

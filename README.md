@@ -14,6 +14,17 @@ Sperrt der Anbieter Cloudflare, zeigt die App das als `HTTP 403` an. Dann hilft 
 
 Tipp: In Safari auf „Teilen → Zum Home-Bildschirm“ tippen, dann startet die App wie eine normale App.
 
+## Am Fernseher (Hisense mit VIDAA)
+
+1. Am TV die App „Browser“ öffnen und `keremik.github.io/iptv-app` eintippen, dann anmelden.
+2. Als App-Kachel auf dem Startbildschirm (klappt nicht bei jeder Software-Version):
+   im TV-Browser `hisense://debug` eintippen, als Name `IPTV Player` und als Adresse
+   `https://keremik.github.io/iptv-app/` eintragen, bei Symbol-Feldern
+   `https://keremik.github.io/iptv-app/icon.png`, dann „Install“.
+
+Die App vermeidet neuere Web-Technik, damit sie auch im älteren Browser des Fernsehers (Chrome 77) läuft,
+und lässt sich mit den Pfeiltasten der Fernbedienung bedienen.
+
 ## Sprachen
 
 Angezeigt werden nur deutsche und türkische Inhalte (auch Österreich). Erkannt wird das am Namen
