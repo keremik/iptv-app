@@ -83,6 +83,9 @@ class MainActivity : AppCompatActivity() {
   private var stallSince = 0L
   private var lastBuffered = 0L
   private var lastProgress = 0L
+  private var bufStart = 0L
+  @Volatile private var lastBytesAt = 0L
+  private var loadStartAt = 0L
   private var retryTask: Runnable? = null
   private lateinit var statusView: TextView
   // Bildwiederholrate an die Sendung anpassen (50 Hz für Fernsehen, 24 Hz für Filme)
@@ -195,6 +198,8 @@ class MainActivity : AppCompatActivity() {
       setBackgroundColor(Color.BLACK)
       isFocusable = true
       isFocusableInTouchMode = true
+      // requestFocus() soll den Player selbst auswählen, nicht irgendeinen Knopf (sonst landete die Auswahl auf dem Zahnrad)
+      descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
     }
     overlay = FrameLayout(this).apply {
       visibility = View.GONE
@@ -297,8 +302,16 @@ class MainActivity : AppCompatActivity() {
     val http = DefaultHttpDataSource.Factory()
       .setUserAgent(UA)
       .setAllowCrossProtocolRedirects(true)
-      .setConnectTimeoutMs(8000)
-      .setReadTimeoutMs(8000)
+      .setConnectTimeoutMs(6000)
+      // 3 s ohne ein einziges Byte = Leitung steht: sofort neue Verbindung (Puffer bleibt erhalten)
+      .setReadTimeoutMs(3000)
+      // misst, wann zuletzt Daten vom Anbieter kamen (Grundlage der Hänger-Erkennung)
+      .setTransferListener(object : androidx.media3.datasource.TransferListener {
+        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) { lastBytesAt = SystemClock.uptimeMillis() }
+        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) { lastBytesAt = SystemClock.uptimeMillis() }
+        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+      })
       .setKeepPostFor302Redirects(true)
     // Kurze Aussetzer überbrückt der Player selbst (ohne Puffer zu verlieren): schnell und mehrfach neu versuchen
     val retry = object : DefaultLoadErrorHandlingPolicy(2) {
@@ -343,12 +356,13 @@ class MainActivity : AppCompatActivity() {
     val pos = p.currentPosition
     if (isLive) p.setMediaItem(MediaItem.fromUri(u)) else p.setMediaItem(MediaItem.fromUri(u), pos)
     p.prepare(); p.playWhenReady = true
-    stallSince = 0; lastBuffered = 0; lastProgress = SystemClock.uptimeMillis()
+    stallSince = 0; lastBuffered = 0; lastProgress = SystemClock.uptimeMillis(); loadStartAt = lastProgress
   }
 
   // Verbindung weg, Anbieter-Fehler oder Hänger: erst schnell neu verbinden, dann andere Adresse (HLS/TS),
   // dann (Live) automatisch eine andere Variante desselben Senders, die dasselbe zeigt.
   private fun recover(err: PlaybackException?) {
+    android.util.Log.i("IPFLIX", "Wiederherstellen: " + (err?.errorCodeName ?: "Hänger/Ende") + " Versuch=$attempts url=$urlIdx")
     if (player == null || overlay.visibility != View.VISIBLE) return
     stallSince = 0
     if (!isOnline()) {
@@ -394,18 +408,17 @@ class MainActivity : AppCompatActivity() {
       if (overlay.visibility != View.VISIBLE) return
       val p = player
       val now = SystemClock.uptimeMillis()
-      // Kommen noch Daten an? Dann nur warten. Steht die Verbindung (keine neuen Daten), sofort neu verbinden.
-      if (p != null) {
-        val buf = p.bufferedPosition
-        if (buf > lastBuffered + 100 || buf < lastBuffered) lastProgress = now
-        lastBuffered = buf
-      }
+      // Kommen noch Daten vom Anbieter an? Dann nur warten. Steht die Verbindung (keine neuen Daten), neu verbinden.
+      lastProgress = maxOf(lastProgress, lastBytesAt)
+      if (DEBUG_LOG && p != null && (now / 1000) % 3 == 0L) android.util.Log.d("IPFLIX", "st=${p.playbackState} playing=${p.isPlaying} pos=${p.currentPosition} buf=${p.bufferedPosition} bytesAgo=${now - lastBytesAt}")
       if (p != null && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING) {
         if (stallSince == 0L) stallSince = now
         // TS liefert laufend Daten (4 s ohne Daten = tot); HLS kommt in Stücken, dort länger warten
         val ts = urls.getOrNull(urlIdx)?.substringBefore('?')?.endsWith(".ts") == true
-        val dead = now - lastProgress > (if (isLive && ts) 4_000 else if (isLive) 12_000 else 8_000)   // Verbindung tot
-        val long = now - stallSince > (if (isLive) 15_000 else 25_000)        // kommt zu langsam
+        // vor den ersten Daten großzügiger (manche Anbieter brauchen ein paar Sekunden, bis ein Sender anläuft)
+        val started = lastBytesAt > loadStartAt
+        val dead = now - lastProgress > (if (!started) 9_000 else if (isLive && ts) 4_000 else if (isLive) 12_000 else 8_000)
+        val long = now - stallSince > (if (isLive) 20_000 else 30_000)        // kommt zu langsam
         if (dead || long) recover(null)
       } else stallSince = 0
       main.postDelayed(this, 1000)
@@ -498,6 +511,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPlaybackStateChanged(state: Int) {
+      // Protokoll (logcat "IPFLIX"): Pufferphasen mit Dauer, um Hänger zu messen
+      val now = SystemClock.uptimeMillis()
+      if (state == Player.STATE_BUFFERING) bufStart = now
+      if (state == Player.STATE_READY && bufStart > 0) {
+        android.util.Log.i("IPFLIX", "Puffern beendet nach ${now - bufStart} ms (live=$isLive)"); bufStart = 0
+      }
       if (state == Player.STATE_READY) startTimer()
       if (state == Player.STATE_ENDED) {
         if (isLive) {
@@ -603,7 +622,7 @@ class MainActivity : AppCompatActivity() {
     isLive = live
     urls = listOf(url, alt).filter { it.isNotEmpty() }.distinct()
     urlIdx = 0; attempts = 0; authRetry = false; stallSince = 0
-    lastBuffered = 0; lastProgress = SystemClock.uptimeMillis()
+    lastBuffered = 0; lastProgress = SystemClock.uptimeMillis(); loadStartAt = lastProgress
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     showStatus(null)
     titleView.text = title
@@ -657,8 +676,6 @@ class MainActivity : AppCompatActivity() {
     }
     skipView.visibility = View.VISIBLE
     playerView.showController()       // Fortschrittsbalken mit Zeit sichtbar, wie bei Netflix
-    // Die Leiste setzt die Auswahl sonst auf Pause: beim Spulen bleiben, damit weiteres links/rechts weiterspult
-    playerView.post { if (skipActive) playerView.requestFocus() }
     main.removeCallbacks(endSkip); main.postDelayed(endSkip, 1300)
   }
 
@@ -708,13 +725,15 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
       }
       val p = player
-      val ctrl = playerView.isControllerFullyVisible
+      // Leiste sichtbar (auch während sie noch einblendet); "fully visible" ist beim Einblenden noch falsch
+      val ctrl = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_controller)?.visibility == View.VISIBLE
       val f = playerView.findFocus()
-      val inButtons = ctrl && f != null && f !== playerView     // Nutzer bewegt sich in den Knöpfen (z. B. Zahnrad für Tonspur)
+      val skipping = skipActive && !isLive && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)
+      val inButtons = ctrl && f != null && f !== playerView && !skipping     // Nutzer bewegt sich in den Knöpfen (z. B. Zahnrad für Tonspur)
       val first = down && event.repeatCount == 0
       if (k == KeyEvent.KEYCODE_BACK) {
         if (first) {
-          if (inButtons) { playerView.hideController(); playerView.requestFocus() }
+          if (inButtons) { playerView.hideController(); playerView.requestFocus() }   // PlayerView selbst, nicht ein Knopf
           else { reportTime(); hidePlayer(); runJs("window.__player&&__player.back&&__player.back()") }
         }
         return true
@@ -817,7 +836,8 @@ class MainActivity : AppCompatActivity() {
   companion object {
     const val UA = "IPTVSmartersPro"
     const val LIVE_START_US = 2_500_000L
-    const val LIVE_REBUFFER_US = 5_000_000L
+    const val LIVE_REBUFFER_US = 4_000_000L
+    const val DEBUG_LOG = false
   }
 
   private fun matchParent() = FrameLayout.LayoutParams(
