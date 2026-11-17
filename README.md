@@ -155,5 +155,6 @@ an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit ältere
   (z. B. FHD → HD → Ersatz), beim Spiel des Lieblingsvereins auch auf einen anderen Sender mit dem Spiel.
   Fällt das Internet aus, geht die Wiedergabe von selbst weiter, sobald es zurück ist. Filme setzen an der
   gleichen Stelle fort.
-- **Spulen wie bei Netflix:** Bei Filmen und Serien zweimal schnell rechts/links drücken springt 10 Sekunden
-  vor/zurück, jeder weitere Druck nochmal 10 Sekunden. Einmal drücken zeigt die Steuerung.
+- **Player-Bedienung (Filme/Serien):** rechts/links = 10 Sekunden vor/zurück (gedrückt halten spult schneller),
+  OK = Pause/Weiter, hoch = Leiste zeigen, runter = in die Knöpfe (Zeitbalken, Zahnrad für Tonspur/Untertitel),
+  Zurück = Knöpfe verlassen bzw. Player schließen. Live: hoch/runter wechselt den Sender, OK zeigt die Leiste.

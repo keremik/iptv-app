@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
 
     // Puffer für flüssige Wiedergabe: schneller Start (1,5 s), danach bis 50 s vorladen; nach einem Hänger 3 s sammeln
     val loadControl = DefaultLoadControl.Builder()
-      .setBufferDurationsMs(20_000, 50_000, 1_500, 3_000)
+      .setBufferDurationsMs(20_000, 50_000, 1_000, 2_500)
       .setTargetBufferBytes(96 * 1024 * 1024)
       .setPrioritizeTimeOverSizeThresholds(false)
       .build()
@@ -438,6 +438,7 @@ class MainActivity : AppCompatActivity() {
     modeChanged = true
     window.attributes = window.attributes.also { it.preferredDisplayModeId = m.modeId }
   }
+  private val restoreLater = Runnable { restoreMode() }
   private fun restoreMode() {
     if (!modeChanged) return
     modeChanged = false
@@ -555,6 +556,10 @@ class MainActivity : AppCompatActivity() {
     @JavascriptInterface fun play(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
       main.post { showPlayer(url, live, title, startSec, alt) }
     }
+    // Adresse des Anbieters vorab auflösen (DNS), damit der erste Sender schneller startet
+    @JavascriptInterface fun warm(url: String) {
+      Thread { try { java.net.InetAddress.getAllByName(URL(url).host) } catch (e: Exception) {} }.start()
+    }
     @JavascriptInterface fun afr(on: Boolean) { main.post { afrEnabled = on; if (!on) restoreMode() } }
     @JavascriptInterface fun stop() { main.post { hidePlayer() } }
     @JavascriptInterface fun subtitle(text: String) {
@@ -575,6 +580,7 @@ class MainActivity : AppCompatActivity() {
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     showStatus(null)
     titleView.text = title
+    main.removeCallbacks(restoreLater)
     subtitleView.text = ""; subtitleView.visibility = View.GONE
     p.setMediaItem(MediaItem.fromUri(url))
     p.prepare()
@@ -599,32 +605,39 @@ class MainActivity : AppCompatActivity() {
     if (ms > 0) main.postDelayed(hideInfo, ms)
   }
 
-  private val singleTap = Runnable { if (!skipActive) playerView.showController() }
   private val endSkip = Runnable { skipActive = false; skipSum = 0; skipView.visibility = View.GONE }
-  private fun skip(dir: Int) {
+  // In den Knöpfen der Steuerleiste bewegen (Zahnrad: Tonspur/Untertitel)
+  private fun focusButtons() {
+    playerView.showController()
+    (playerView.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause))?.requestFocus()
+  }
+  private fun skip(dir: Int, sec: Int = 10) {
     val p = player ?: return
     if (!skipActive || skipDir != dir) { skipSum = 0 }
     skipActive = true; skipDir = dir
     val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
-    val target = (p.currentPosition + dir * 10_000L).coerceIn(0L, maxOf(0L, dur - 1_000L))
+    val target = (p.currentPosition + dir * sec * 1000L).coerceIn(0L, maxOf(0L, dur - 1_000L))
     p.seekTo(target)
-    skipSum += 10
-    skipView.text = if (dir > 0) "$skipSum Sek.  »" else "«  $skipSum Sek."
+    skipSum += sec
+    val t = if (skipSum >= 60) "${skipSum / 60}:${"%02d".format(skipSum % 60)} Min." else "$skipSum Sek."
+    skipView.text = if (dir > 0) "$t  »" else "«  $t"
     (skipView.layoutParams as FrameLayout.LayoutParams).apply {
       gravity = Gravity.CENTER_VERTICAL or (if (dir > 0) Gravity.END else Gravity.START)
       setMargins(dp(90), 0, dp(90), 0)
       skipView.layoutParams = this
     }
     skipView.visibility = View.VISIBLE
+    playerView.showController()       // Fortschrittsbalken mit Zeit sichtbar, wie bei Netflix
     main.removeCallbacks(endSkip); main.postDelayed(endSkip, 1300)
   }
 
   private fun hidePlayer() {
     playToken++
-    main.removeCallbacks(singleTap); main.removeCallbacks(endSkip); endSkip.run()
+    main.removeCallbacks(endSkip); endSkip.run()
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     main.removeCallbacks(watchdog); showStatus(null)
-    restoreMode(); fpsToken = -1
+    // Bildrate erst nach einer Minute ohne Wiedergabe zurückstellen: beim Umschalten kein erneutes Schwarzbild
+    main.removeCallbacks(restoreLater); main.postDelayed(restoreLater, 60_000); fpsToken = -1
     val wasShown = overlay.visibility == View.VISIBLE
     player?.let { it.playWhenReady = false; it.stop(); it.clearMediaItems() }
     overlay.visibility = View.GONE
@@ -663,44 +676,65 @@ class MainActivity : AppCompatActivity() {
       if (k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN || k == KeyEvent.KEYCODE_VOLUME_MUTE) {
         return super.dispatchKeyEvent(event)
       }
+      val p = player
+      val ctrl = playerView.isControllerFullyVisible
+      val f = playerView.findFocus()
+      val inButtons = ctrl && f != null && f !== playerView     // Nutzer bewegt sich in den Knöpfen (z. B. Zahnrad für Tonspur)
+      val first = down && event.repeatCount == 0
       if (k == KeyEvent.KEYCODE_BACK) {
-        if (down && event.repeatCount == 0) {
-          reportTime()
-          hidePlayer(); runJs("window.__player&&__player.back&&__player.back()")
+        if (first) {
+          if (inButtons) { playerView.hideController(); playerView.requestFocus() }
+          else { reportTime(); hidePlayer(); runJs("window.__player&&__player.back&&__player.back()") }
         }
         return true
       }
-      if (down && event.repeatCount == 0) {
+      if (first) {
         when (k) {
-          KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_NEXT -> {
-            runJs("window.__player&&__player.switch&&__player.switch(1)"); return true
-          }
-          KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-            runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true
-          }
-          KeyEvent.KEYCODE_DPAD_UP -> if (isLive && !playerView.isControllerFullyVisible) {
-            runJs("window.__player&&__player.switch&&__player.switch(1)"); return true
-          }
-          KeyEvent.KEYCODE_DPAD_DOWN -> if (isLive && !playerView.isControllerFullyVisible) {
-            runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true
-          }
+          KeyEvent.KEYCODE_CHANNEL_UP -> { runJs("window.__player&&__player.switch&&__player.switch(1)"); return true }
+          KeyEvent.KEYCODE_CHANNEL_DOWN -> { runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true }
+          KeyEvent.KEYCODE_MEDIA_NEXT -> if (isLive) { runJs("window.__player&&__player.switch&&__player.switch(1)"); return true }
+          KeyEvent.KEYCODE_MEDIA_PREVIOUS -> if (isLive) { runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true }
         }
       }
-      // Filme/Serien: zweimal schnell links/rechts = 10 s springen; einmal = Steuerung zeigen
-      if (!isLive && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) &&
-          (skipActive || !playerView.isControllerFullyVisible)) {
-        if (down && event.repeatCount == 0) {
-          val dir = if (k == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
-          val now = SystemClock.uptimeMillis()
-          main.removeCallbacks(singleTap)
-          if (skipActive && skipDir == dir) skip(dir)
-          else if (skipDir == dir && now - lastTap < 450) skip(dir)
-          else { skipActive = false; main.postDelayed(singleTap, 450) }
-          skipDir = dir; lastTap = now
+      if (inButtons) { playerView.dispatchKeyEvent(event); return true }
+      val isOk = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+                 k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_SPACE
+      when (k) {
+        KeyEvent.KEYCODE_DPAD_UP -> {
+          if (first) { if (isLive && !ctrl) runJs("window.__player&&__player.switch&&__player.switch(1)") else playerView.showController() }
+          return true
+        }
+        KeyEvent.KEYCODE_DPAD_DOWN -> {
+          if (first) { if (isLive && !ctrl) runJs("window.__player&&__player.switch&&__player.switch(-1)") else focusButtons() }
+          return true
+        }
+        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND -> {
+          if (down) {
+            // Live: nur spulen, wenn der Anbieter ein Zeitfenster liefert; sonst Leiste zeigen
+            if (isLive && p?.isCurrentMediaItemSeekable != true) { if (first) playerView.showController() }
+            else {
+              // Filme/Serien: jeder Druck 10 s; gedrückt halten spult immer schneller (30 s, dann 60 s)
+              val now = SystemClock.uptimeMillis()
+              if (first || now - lastTap >= 220) {
+                val dir = if (k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) 1 else -1
+                val step = when { event.repeatCount >= 25 -> 60; event.repeatCount >= 8 -> 30; else -> 10 }
+                skip(dir, step); lastTap = now
+              }
+            }
+          }
+          return true
+        }
+        KeyEvent.KEYCODE_MEDIA_PLAY -> { if (first) { p?.play(); playerView.showController() }; return true }
+        KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (first) { p?.pause(); playerView.showController() }; return true }
+      }
+      if (isOk) {
+        // OK: Pause/Weiter (Live beim ersten Druck nur die Leiste zeigen)
+        if (first && p != null) {
+          if (isLive && !ctrl && k != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) playerView.showController()
+          else { if (p.isPlaying || (p.playWhenReady && p.playbackState == Player.STATE_BUFFERING)) p.pause() else p.play(); playerView.showController() }
         }
         return true
       }
-      // alles andere (OK, links/rechts zum Spulen, Play/Pause) bekommt nur der Player
       playerView.dispatchKeyEvent(event)
       return true
     }
@@ -727,6 +761,10 @@ class MainActivity : AppCompatActivity() {
     reportTime()
     runJs("window.__player&&__player.hidden&&__player.hidden()")
     super.onPause(); player?.pause()
+  }
+  override fun onStop() {
+    super.onStop()
+    main.removeCallbacks(restoreLater); restoreMode()   // App verlassen: Fernseher wieder auf die normale Bildrate
   }
   override fun onResume() {
     super.onResume()

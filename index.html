@@ -417,8 +417,9 @@ function nativeStart(src, live, name) {
   let startSec = 0;
   if (!live && nowPlaying && nowPlaying.seek) { startSec = nowPlaying.seek; nowPlaying.seek = 0; }
   appPos = 0; appDur = 0;
-  const primary = live ? src.rawM3u8 : src.rawUrl;
-  const alt = live ? src.rawTs : '';
+  // Live: TS zuerst (startet beim Anbieter am schnellsten, wie bei IPTV Smarters), HLS als Reserve
+  const primary = live ? src.rawTs : src.rawUrl;
+  const alt = live ? src.rawM3u8 : '';
   try { window.NativePlayer.play(primary, !!live, name || '', Math.floor(startSec) || 0, alt || ''); }
   catch (e) { toast('Player-Fehler: ' + e.message, true); }
 }
@@ -554,8 +555,33 @@ function pretty(name) {
 }
 const chanName = name => String(name || '').replace(LANG_PREFIX, '').replace(CHAN_SPACE, '').trim() || String(name || '');
 // Trenn-Einträge des Anbieters wie "-- TURKIYE --" oder "##### DE #####" sind keine Sender
-const SEP = '[-–—=#*_~•●★▬■◆►◄|.:+<>]';
-const PLACEHOLDER = new RegExp(`^\\s*${SEP}{2,}.*${SEP}{2,}\\s*$|^[^A-Za-z0-9\\u00c0-\\u024f]*$`);
+const SEP = '[-–—=#*_~•●★☆✦✪✯⭐▬■□◆◇♦►◄▶◀➾➤➜→←|.:+<>═━─│┃]';
+const PLACEHOLDER = new RegExp(`^\\s*${SEP}{2,}.*${SEP}{2,}\\s*$|^\\s*${SEP}{4,}|${SEP}{4,}\\s*$|^[^A-Za-z0-9\\u00c0-\\u024f]*$`);
+const DECOR = new RegExp(SEP + '{2,}|[★☆✦✪✯⭐➾➤▶◀►◄]');
+const squash = s => fold(s).replace(/[^a-z0-9]/g, '');
+// Überschrift-Einträge einer Kategorie (z. B. "DE ➾ MAGENTA TV" mit Flaggen-Bild als erster "Sender") sind keine Sender
+function dropHeaders(list, cats) {
+  const catKey = {};
+  cats.forEach(c => { catKey[String(c.category_id)] = squash(prettyCat(c.category_name)); });
+  const seen = new Set();
+  return list.filter(it => {
+    const c = String(it.cat), firstInCat = !seen.has(c);
+    seen.add(c);
+    const key = squash(it.name), ck = catKey[c];
+    if (!key || !ck) return true;
+    if (key === ck && (firstInCat || DECOR.test(it.raw))) return false;              // heißt wie die Kategorie
+    if (firstInCat && /flag|flagge|bayrak|country/i.test(it.img || '')) return false;   // Flaggen-Bild als Überschrift
+    if (firstInCat && /^(deutschland|germany|almanya|turkiye|turkey|osterreich|austria|schweiz|switzerland)$/.test(key)) return false;
+    return true;
+  });
+}
+// Folgentitel wie "Dead-End.Job.S01E01.GERMAN.720p.WEB.h264-GRUPPE" sind Dateinamen: lesbar machen
+function epTitle(t, n) {
+  const x = chanName(t);
+  if (!x) return `Folge ${n}`;
+  if (/S\d{1,2}\s*E\d{1,3}/i.test(x) || (/^[^\s]+$/.test(x) && (x.match(/\./g) || []).length >= 3)) return `Folge ${n}`;
+  return x;
+}
 const isPlaceholder = name => PLACEHOLDER.test(String(name || ''));
 // Kategorie: Sprachkürzel weg ("TR Haber" -> "Haber"), GROSSBUCHSTABEN lesbar machen
 const KEEP_UPPER = new Set(['HEVC', 'H265', 'H264', 'UEFA', 'NFL', 'NBA', 'WWE', 'UFC', 'MOTO', 'XXL']);
@@ -579,7 +605,11 @@ function norm(k, x) {
 }
 const getCats = k => once('c' + k, () => api(CAT[k][0]).then(arr));
 const ITEMS = {};   // bereits geladene Listen (für sofortigen Zugriff ohne Warten)
-const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => (ITEMS[k] = arr(a).filter(x => !isPlaceholder(x.name)).map(x => norm(k, x)))));
+const getItems = k => once('i' + k, () => Promise.all([api(CAT[k][1]), k === 'live' ? getCats(k).catch(() => []) : null]).then(([a, cats]) => {
+  let list = arr(a).filter(x => !isPlaceholder(x.name)).map(x => norm(k, x));
+  if (cats) list = dropHeaders(list, cats);
+  return (ITEMS[k] = list);
+}));
 const getVodInfo = id => once('v' + id, () => api('get_vod_info', '&vod_id=' + enc(id)));
 const getSeriesInfo = id => once('s' + id, () => api('get_series_info', '&series_id=' + enc(id)));
 const clearCache = () => { for (const k in memo) delete memo[k]; for (const k in ITEMS) delete ITEMS[k]; };
@@ -1553,7 +1583,7 @@ function renderEpisodes(box, series, d, seasons) {
       const r = res['e' + ep.id];
       if (r) { const b = el('div', 'bar'), i = el('i'); i.style.width = Math.min(100, r.t / r.d * 100) + '%'; b.append(i); thumb.append(b); }
       const t = el('div', 't'), b = el('b');
-      b.append(el('span', null, chanName(ep.title) || `Folge ${ep.episode_num || idx + 1}`), el('span', null, inf.duration || ''));
+      b.append(el('span', null, epTitle(ep.title, ep.episode_num || idx + 1)), el('span', null, inf.duration || ''));
       t.append(b, el('p', null, inf.plot || ''));
       row.append(el('span', 'n', String(ep.episode_num || idx + 1)), thumb, t);
       row.onclick = () => playEpisode(series, ep, s);
@@ -1820,7 +1850,7 @@ function playMovie(it) {
 
 function playEpisode(series, ep, season) {
   const e = { key: 'e' + ep.id, kind: 'ep', id: ep.id, ext: ep.container_extension || 'mp4', name: series.name,
-              sub: `S${season} F${ep.episode_num || ''} · ${chanName(ep.title)}`.replace(/ · $/, ''), img: series.img,
+              sub: `S${season} F${ep.episode_num || ''}` + (/^Folge \d+$/.test(epTitle(ep.title, 0)) ? '' : ` · ${epTitle(ep.title, 0)}`), img: series.img,
               seriesId: series.id, season, cat: series.cat, genre: series.genre };
   playVod(e, (resumeOf(e.key) || {}).t);
 }
@@ -2230,6 +2260,7 @@ window.__appBack = function () {
 /* ---------- Start ---------- */
 if (cfg) {
   if (HP || APP) cfg.proxy = '';
+  if (APP && window.NativePlayer.warm) { try { window.NativePlayer.warm(base()); } catch (e) {} }   // schnellerer erster Start
   history.replaceState({ name: 'home', id: 0 }, '');
   if (!store.get('setupDone', false)) showSetup(true);
   else { showApp(); render('home', null); }
