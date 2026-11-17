@@ -80,6 +80,13 @@
   .slider { display: flex; gap: var(--gap); overflow-x: auto; padding: 12px var(--pad) 22px; scroll-padding: 0 var(--pad);
             scroll-snap-type: x proximity; scrollbar-width: none; }
   .slider::-webkit-scrollbar { display: none; }
+  /* Pfeile zum Blättern mit Maus oder TV-Zeiger */
+  .slidewrap { position: relative; }
+  .chev { position: absolute; top: 12px; bottom: 22px; z-index: 4; width: var(--pad); min-width: 40px; border: 0; cursor: pointer;
+          background: rgba(20,20,20,.55); color: #fff; font-size: 44px; line-height: 1; opacity: .55; transition: opacity .2s; }
+  .chev.l { left: 0; } .chev.r { right: 0; }
+  .chev:hover { opacity: 1; background: rgba(20,20,20,.8); }
+  @media (hover: none) and (pointer: coarse) { .chev { display: none; } }
   .card { flex: 0 0 auto; position: relative; border-radius: 4px; overflow: hidden; background: var(--card); cursor: pointer;
           scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease; }
   .card.poster { width: clamp(112px, 13.5vw, 210px); aspect-ratio: 2 / 3; }
@@ -573,7 +580,15 @@ function buildRow(d) {
     m.onclick = showAll;
     s.append(m);
   }
-  r.append(h, s);
+  const wrap = el('div', 'slidewrap');
+  const chev = (cls, txt, dir) => {
+    const b = button('chev ' + cls, txt, () => s.scrollBy({ left: dir * s.clientWidth * 0.85, behavior: 'smooth' }));
+    b.tabIndex = -1;
+    b.setAttribute('aria-hidden', 'true');
+    return b;
+  };
+  wrap.append(chev('l', '‹', -1), s, chev('r', '›', 1));
+  r.append(h, wrap);
   return r;
 }
 
@@ -1062,7 +1077,7 @@ function layer() {
 function move(dir) {
   const root = layer();
   const list = [...root.querySelectorAll('[data-nav], button, input, select, video')]
-    .filter(e => !e.disabled && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #toast')));
+    .filter(e => !e.disabled && !e.classList.contains('chev') && e.getClientRects().length && !e.closest('[hidden]') && (root !== document.body || !e.closest('#player, #menu, #login, #toast')));
   const cur = document.activeElement;
   if (!list.includes(cur)) {
     const start = root.querySelector('.btn.play, [data-nav]') || list[0];
@@ -1078,6 +1093,7 @@ function move(dir) {
     let main, cross;
     if (dir === 'left' || dir === 'right') {
       if (dir === 'left' ? dx > -4 : dx < 4) continue;
+      if (b.bottom <= a.top || b.top >= a.bottom) continue;      // nur in derselben Zeile
       main = Math.abs(dx); cross = Math.abs(dy) * 4;
     } else {
       if (dir === 'up' ? dy > -4 : dy < 4) continue;
