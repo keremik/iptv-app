@@ -1,0 +1,46 @@
+{
+  "updated": "2026-11-17T02:20:00Z",
+  "matches": [
+    {
+      "id": "2527825",
+      "home": "Galatasaray",
+      "away": "Samsunspor",
+      "kickoff": "2026-11-21T13:00:00Z",
+      "channels": ["beIN Sports 1"],
+      "family": ["beIN Sports"],
+      "status": "erwartet",
+      "note": "Mehrere türkische Medien nennen beIN Sports 1. beIN hatte den genauen Kanal am 16.11. noch nicht in der eigenen Programmübersicht.",
+      "sources": [
+        "https://www.milliyet.com.tr/bilgi-rehberi/galatasaray-samsunspor-maci-ne-zaman-saat-kacta-hangi-kanalda-galatasaray-samsunspor-maci-nerede-oynanacak-7701856",
+        "https://www.habercitv.com.tr/galatasaray-samsunspor-maci-ne-zaman-saat-kacta-hangi-kanalda"
+      ]
+    },
+    {
+      "id": "2594655",
+      "home": "Galatasaray",
+      "away": "Aston Villa",
+      "kickoff": "2026-11-24T17:45:00Z",
+      "channels": ["TRT 1"],
+      "family": ["tabii", "TRT Spor"],
+      "status": "erwartet",
+      "note": "Laut mehreren Medien live und unverschlüsselt bei TRT 1. Eine eigene Ankündigung von TRT lag am 17.11. noch nicht vor.",
+      "sources": [
+        "https://www.cnnturk.com/spor/futbol/galatasaray-aston-villa-maci-ne-zaman-hangi-kanalda-galatasaray-aston-villa-maci-saat-kacta-sifreli-mi-sifresiz-mi-3488645",
+        "https://www.fotomac.com.tr/galatasaray/2026/11/16/galatasaray-aston-villa-maci-ne-zaman-sampiyonlar-liginde-5-hafta"
+      ]
+    },
+    {
+      "id": "2527832",
+      "home": "Beşiktaş",
+      "away": "Galatasaray",
+      "kickoff": "2026-11-30T18:00:00Z",
+      "channels": ["beIN Sports 1"],
+      "family": ["beIN Sports"],
+      "status": "erwartet",
+      "note": "Die Süper Lig läuft in dieser Saison bei beIN Sports. Der genaue Kanal steht noch nicht fest, Derbys laufen üblicherweise auf beIN Sports 1.",
+      "sources": [
+        "https://www.birgun.net/haber/2026-2027-sezonunda-hangi-lig-hangi-kanalda-yayinlanacak-725840"
+      ]
+    }
+  ]
+}

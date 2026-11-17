@@ -33,6 +33,9 @@ und lässt sich mit den Pfeiltasten der Fernbedienung bedienen.
 - Für den Lieblingsverein (Voreinstellung Galatasaray, änderbar im Profil-Menü) zeigt die Startseite das nächste Spiel
   und passende Sender. Der Spielplan kommt von TheSportsDB. Ab 36 Stunden vor dem Anpfiff sucht die App im Programm
   des Anbieters nach dem Spiel.
+- Welcher Sender ein Spiel wirklich zeigt, steht in `broadcast.json`. Die Datei wird vor den Spielen per Recherche
+  aktualisiert (türkische Sportmedien, Rechteinhaber). Die App zeigt den Sender mit allen Varianten des Anbieters
+  (4K, Full HD, HD, HEVC, VIP, Ersatz), die beste Auflösung zuerst.
 - Senderlogos kommen zuerst aus der Sammlung [tv-logo/tv-logos](https://github.com/tv-logo/tv-logos), sonst vom Anbieter.
 
 ## Sprachen

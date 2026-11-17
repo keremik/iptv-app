@@ -140,6 +140,7 @@
   .mpill { margin-left: auto; padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,.14); font-weight: 700; font-size: 14px; white-space: nowrap; }
   .mpill.live { background: var(--accent); }
   .mlater { padding: 12px 24px 0; color: var(--muted); font-size: 13px; }
+  .mnote { margin: 2px 24px 0; color: var(--muted); font-size: 13px; line-height: 1.45; max-width: 900px; }
   .match h3 { margin: 16px 24px 0; font-size: 15px; color: #e5e5e5; }
   .match .slider { padding: 6px 16px 10px; scroll-padding: 0 16px; }
 
@@ -248,7 +249,7 @@
     .mhead { padding: 0 14px; }
     .mbadge { width: 44px; height: 44px; margin-right: 10px; }
     .mpill { margin: 10px 0 0; }
-    .mlater, .match h3 { padding-left: 0; margin-left: 14px; margin-right: 14px; }
+    .mlater, .match h3, .mnote { padding-left: 0; margin-left: 14px; margin-right: 14px; }
     .match .slider { padding: 6px 6px 10px; }
   }
 
@@ -517,11 +518,31 @@ const POPULAR = [
 ];
 const POP_EXACT = {}, POP_PREFIX = [];
 POPULAR.forEach((e, i) => { if (e.slice(-1) === '*') POP_PREFIX.push([e.slice(0, -1), i]); else if (!(e in POP_EXACT)) POP_EXACT[e] = i; });
+// Schlüssel für "derselbe Sender": "VIP TRT 1", "TRT 1 FHD" und "TRT 1 HEVC" ergeben alle "trt1"
+function chanKey(name) {
+  const base = logoBase(name);
+  let k = (LOGO_ALIAS[base] || base).replace(/-/g, '').replace(/^beinsport(?!s)/, 'beinsports');
+  if (/tv$/.test(k) && k.length >= 5) k = k.slice(0, -2);            // "showtv" -> "show", aber "atv" und "ntv" bleiben
+  return k;
+}
+// Variante eines Senders aus dem Namen lesen: Auflösung und Zusätze
+function quality(raw) {
+  const t = fold(raw).split(/[^a-z0-9]+/);
+  const has = (...w) => w.some(x => t.indexOf(x) >= 0);
+  const res = has('4k', 'uhd', '2160p') ? ['4K', 4] : has('fhd', '1080p', '1080') ? ['Full HD', 3] : has('hd', '720p', '720') ? ['HD', 2] : has('sd') ? ['SD', 1] : ['', 1.5];
+  const extra = [];
+  if (has('hevc', 'h265')) extra.push('HEVC');
+  if (has('vip')) extra.push('VIP');
+  if (has('raw')) extra.push('RAW');
+  if (has('50fps', '60fps')) extra.push('50 fps');
+  if (has('backup', 'yedek')) extra.push('Ersatz');
+  return { label: [res[0]].concat(extra).filter(Boolean).join(' · '), rank: res[1] - (has('backup', 'yedek') ? 0.4 : 0) };
+}
+const byQuality = items => items.map((it, i) => [it, i]).sort((a, b) => quality(b[0].raw).rank - quality(a[0].raw).rank || a[1] - b[1]).map(x => x[0]);
+
 function popRank(it) {
   if (it.rank !== undefined) return it.rank;
-  const base = logoBase(it.name);
-  let k = (LOGO_ALIAS[base] || base).replace(/-/g, '');
-  if (/tv$/.test(k) && k.length >= 5) k = k.slice(0, -2);            // "showtv" -> "show", aber "atv" und "ntv" bleiben
+  const k = chanKey(it.name);
   let r = k in POP_EXACT ? POP_EXACT[k] : Infinity;
   if (r === Infinity) for (const p of POP_PREFIX) if (k.indexOf(p[0]) === 0) { r = p[1]; break; }
   return (it.rank = r);
@@ -799,18 +820,46 @@ const fmtDay = t => new Date(t).toLocaleDateString('de-DE', { weekday: 'short', 
 const fmtClock = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 const leagueName = n => LEAGUE_NAMES[n] || n || '';
 
-// Sender für ein Spiel: 1. laut Programm (EPG), 2. Sender mit dem Vereinsnamen, 3. übliche Sender des Wettbewerbs
+// Recherchierte Sender je Spiel. Die Datei broadcast.json im Repo wird vor den Spielen per Recherche aktualisiert.
+const BROADCAST_URL = 'https://keremik.github.io/iptv-app/broadcast.json';
+let broadcastMemo = null;
+function loadBroadcast() {
+  if (broadcastMemo && Date.now() - broadcastMemo.ts < 30 * 60e3) return broadcastMemo.p;
+  const p = fetch(BROADCAST_URL + '?t=' + Math.floor(Date.now() / 1800e3)).then(r => r.ok ? r.json() : null).catch(() => null);
+  broadcastMemo = { ts: Date.now(), p };
+  return p;
+}
+async function researchFor(m) {
+  const d = await loadBroadcast(), list = arr(d && d.matches);
+  const same = (a, b) => fold(a).slice(0, 6) === fold(b).slice(0, 6);
+  return list.filter(x => String(x.id) === String(m.id))[0] ||
+    list.filter(x => same(x.home, m.home) && same(x.away, m.away) && Math.abs(Date.parse(x.kickoff) - m.ts) < 36 * 3600e3)[0] || null;
+}
+
+// Sender für ein Spiel:
+//   1. recherchierter Sender (broadcast.json) mit allen Varianten des Anbieters (4K, Full HD, HD, HEVC, VIP ...),
+//   2. Treffer im Programm des Anbieters (EPG), 3. Sender mit dem Vereinsnamen, 4. übliche Sender des Wettbewerbs
 const epgScans = {};
-async function matchChannels(m, live) {
+async function matchChannels(m, live, all) {
   const key = fold(team), f = it => fold(it.raw || it.name);
+  const info = await researchFor(m);
+  const variants = names => {
+    const keys = arr(names).map(chanKey);
+    const pick = pool => byQuality(pool.filter(it => keys.indexOf(chanKey(it.name)) >= 0));
+    const inLang = pick(live);
+    return inLang.length ? inLang : pick(all);
+  };
+  const main = info ? variants(info.channels) : [];
+  const fam = info ? arr(info.family).map(x => fold(x).replace(/[^a-z0-9]/g, '')) : [];
+  const family = fam.length ? live.filter(it => fam.some(x => chanKey(it.name).indexOf(x) === 0 || f(it).replace(/[^a-z0-9]/g, '').indexOf(x) >= 0)) : [];
   const named = live.filter(it => f(it).includes(key) || (key === 'galatasaray' && /\bgs ?tv\b/.test(f(it))));
   const usual = UEFA.indexOf(m.lid) >= 0 ? /trt ?1\b|trt ?spor|tabii|dazn|sky sport|prime video/ : /bein ?sports?|bein ?max|a ?spor\b/;
-  const likely = live.filter(it => usual.test(f(it)));
+  const likely = family.concat(live.filter(it => usual.test(f(it)) && family.indexOf(it) < 0));
   let hits = [];
   if (m.ts - Date.now() < 36 * 3600e3) {
     if (!epgScans[m.id] || Date.now() - epgScans[m.id].ts > 20 * 60e3) {
       const sport = /bein|spor|sport|tivibu|trt ?1\b|\batv\b|tabii|exxen|dazn|tv ?8|sky/;
-      const cands = likely.concat(live.filter(it => sport.test(f(it)) && likely.indexOf(it) < 0)).slice(0, 36);
+      const cands = main.concat(likely.filter(it => main.indexOf(it) < 0), live.filter(it => sport.test(f(it)) && likely.indexOf(it) < 0 && main.indexOf(it) < 0)).slice(0, 40);
       const out = [];
       let next = 0;
       const worker = async () => {
@@ -829,16 +878,19 @@ async function matchChannels(m, live) {
     }
     hits = epgScans[m.id].out;
   }
-  const seen = new Set(), list = [];
-  const push = (it, note) => { if (!seen.has(it.id) && list.length < 18) { seen.add(it.id); list.push({ it, note }); } };
-  hits.forEach(h => push(h.it, 'Im Programm ' + fmtClock(h.start)));
-  named.forEach(it => push(it, ''));
-  likely.forEach(it => push(it, ''));
-  return { list, fromEpg: hits.length > 0 };
+  // Programmtreffer zählen wie recherchierte Sender: dort läuft das Spiel, samt allen Varianten
+  const epgTimes = {};
+  hits.forEach(h => { epgTimes[h.it.id] = h.start; });
+  const epgMain = hits.length ? variants(hits.map(h => h.it.name)) : [];
+  const best = main.concat(epgMain.filter(it => main.indexOf(it) < 0));
+  const seen = new Set(best.map(it => it.id)), others = [];
+  named.concat(likely).forEach(it => { if (!seen.has(it.id) && others.length < 24) { seen.add(it.id); others.push(it); } });
+  const note = it => [epgTimes[it.id] ? 'Im Programm ' + fmtClock(epgTimes[it.id]) : '', quality(it.raw).label].filter(Boolean).join(' · ');
+  return { info, best, others, note, epg: hits.length > 0 };
 }
 
 // Kasten auf der Startseite und bei Live TV; füllt sich, sobald der Spielplan da ist
-function matchBox(live) {
+function matchBox(live, all) {
   const box = el('div');
   if (!team) return box;
   loadFixtures().then(list => {
@@ -847,8 +899,7 @@ function matchBox(live) {
     const sec = el('section', 'match'), head = el('div', 'mhead'), txt = el('div', 'mtxt');
     const badge = src => { const i = new Image(); i.className = 'mbadge'; i.alt = ''; i.referrerPolicy = 'no-referrer'; i.onerror = () => i.remove(); i.src = src; return i; };
     const pill = el('span', 'mpill' + (Date.now() >= m.ts ? ' live' : ''), whenLabel(m));
-    const title = el('h2', null, `${m.home} – ${m.away}`);
-    txt.append(el('div', 'mleague', leagueName(m.league)), title,
+    txt.append(el('div', 'mleague', leagueName(m.league)), el('h2', null, `${m.home} – ${m.away}`),
       el('div', 'mmeta', `${fmtDay(m.ts)} · ${fmtClock(m.ts)} Uhr${m.venue ? ' · ' + m.venue : ''}`));
     if (m.hb) head.append(badge(m.hb));
     head.append(txt);
@@ -857,15 +908,30 @@ function matchBox(live) {
     sec.append(head);
     const later = list.slice(1, 3).map(x => `${fmtDay(x.ts)} ${fmtClock(x.ts)} ${x.isHome ? 'gegen ' + x.away : 'bei ' + x.home} (${leagueName(x.league)})`);
     if (later.length) sec.append(el('div', 'mlater', 'Danach: ' + later.join('  ·  ')));
-    const chTitle = el('h3', null, 'Suche passende Sender ...'), slider = el('div', 'slider');
-    sec.append(chTitle, slider);
+    const body = el('div');
+    body.append(el('h3', null, 'Suche passende Sender ...'));
+    sec.append(body);
     box.append(sec);
-    matchChannels(m, live).then(res => {
+    matchChannels(m, live, all || live).then(res => {
       if (!sec.isConnected) return;
-      if (!res.list.length) { chTitle.textContent = 'Kein passender Sender gefunden. Nutze die Suche oben.'; slider.remove(); return; }
-      chTitle.textContent = res.fromEpg ? 'Hier läuft das Spiel' : 'Passende Sender';
-      const items = res.list.map(x => x.it);
-      res.list.forEach(x => slider.append(card(x.it, { note: x.note }, items)));
+      setKids(body);
+      const group = (title, items) => {
+        const slider = el('div', 'slider');
+        items.forEach(it => slider.append(card(it, { note: res.note(it) }, items)));
+        body.append(el('h3', null, title), slider);
+      };
+      const info = res.info, names = info ? arr(info.channels).join(', ') : '';
+      if (res.best.length) {
+        const sure = res.epg || (info && info.status === 'bestätigt');
+        group(names ? `${sure ? 'Hier läuft das Spiel' : 'Voraussichtlich'}: ${names}` : 'Hier läuft das Spiel', res.best);
+      } else if (names) {
+        body.append(el('h3', null, `Laut Recherche: ${names}`), el('div', 'mnote', 'Diesen Sender habe ich bei deinem Anbieter nicht gefunden.'));
+      }
+      if (info && info.note) {
+        body.append(el('div', 'mnote', info.note));
+      }
+      if (res.others.length) group(res.best.length ? 'Weitere Sportsender' : 'Passende Sender', res.others);
+      if (!res.best.length && !res.others.length && !names) body.append(el('h3', null, 'Kein passender Sender gefunden. Nutze die Suche oben.'));
     });
   });
   return box;
@@ -896,11 +962,11 @@ const VIEWS = {
       if (S.groups[i]) rows.push({ title: rowTitle('Serien', S.groups[i].title), items: S.groups[i].items });
       if (L.groups[i + 1] && i < 3) rows.push({ title: rowTitle('Live TV', L.groups[i + 1].title), items: L.groups[i + 1].items });
     }
-    return { hero: hero(pickHero(recM) || pickHero(M.items) || pickHero(S.items)), top: [matchBox(L.items)], rows };
+    return { hero: hero(pickHero(recM) || pickHero(M.items) || pickHero(S.items)), top: [matchBox(L.items, L.all)], rows };
   },
   async live() {
     const L = await grouped('live');
-    return { title: 'Live TV', top: [matchBox(L.items)], rows: [{ title: 'Deine Sender', items: topChannels(L.all, 14) }, ...L.groups] };
+    return { title: 'Live TV', top: [matchBox(L.items, L.all)], rows: [{ title: 'Deine Sender', items: topChannels(L.all, 14) }, ...L.groups] };
   },
   async movie() {
     const M = await grouped('movie'), rec = recommend('movie', M.items, 40);
@@ -956,8 +1022,8 @@ function refreshResumeRow() {
    1. offizielles Logo aus der freien Sammlung tv-logo/tv-logos (per Sendername),
    2. Logo des Anbieters, 3. Sendername als Text. Das Ergebnis wird gemerkt. */
 const LOGO_CDN = 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/';
-const LOGO_DROP = new Set(['hd', 'fhd', 'uhd', '4k', '8k', 'sd', 'hevc', 'h265', 'h264', 'raw', 'backup', 'yedek', '1080p', '720p',
-  '1080', '720', '50fps', 'vip', 'de', 'tr', 'at', 'ger', 'tur', 'hq', 'low']);
+const LOGO_DROP = new Set(['hd', 'fhd', 'uhd', '4k', '8k', 'sd', 'hevc', 'h265', 'h264', 'raw', 'backup', 'yedek', '1080p', '720p', '2160p',
+  '1080', '720', '50fps', '60fps', 'vip', 'de', 'tr', 'at', 'ger', 'tur', 'hq', 'low', 'hdr', 'orj', 'orjinal', 'original', 'alternatif']);
 const LOGO_ALIAS = { 'prosieben': 'pro-sieben', 'pro7': 'pro-sieben', 'prosieben-maxx': 'pro-sieben-maxx', 'pro7-maxx': 'pro-sieben-maxx',
   'zdfneo': 'zdf-neo', 'zdfinfo': 'zdf-info', 'n-tv': 'ntv', 'haber-turk': 'haberturk', 'gs-tv': 'galatasaray-tv', 'gstv': 'galatasaray-tv',
   'rtl-2': 'rtl-zwei', 'rtl2': 'rtl-zwei', 'sat1': 'sat-1', 'kabel1': 'kabel-eins', 'kabel-1': 'kabel-eins', 'ard': 'das-erste', 'show-tv': 'show' };
