@@ -1,11 +1,17 @@
-// Cloudflare Worker: leitet Anfragen von der Web-App an den IPTV-Server weiter.
-// Nur der Server UPSTREAM wird durchgelassen, damit der Proxy nicht missbraucht werden kann.
+// Cloudflare Worker: leitet Anfragen von der Web-App an den IPTV-Server weiter,
+// damit die App auch ohne PC (z. B. am iPhone über GitHub Pages) funktioniert.
 //
-// Diagnose: ?u=...&debug=1 ruft die Adresse ab, verfolgt Weiterleitungen einzeln
-// und gibt für jeden Schritt Status, Typ und Ziel als Text zurück (ohne Stream).
+// Durchgelassen wird nur:
+//  - der Server UPSTREAM,
+//  - Adressen, die der Worker selbst signiert hat (Segmente in Playlists nach einer Weiterleitung),
+//  - Bilder (?img=...), nur wenn die Antwort wirklich ein Bild ist.
+// Der Schlüssel SIGN_KEY ist als geheime Variable im Worker hinterlegt, nicht im Code.
+//
+// Diagnose: ?u=...&debug=1 verfolgt Weiterleitungen einzeln und zeigt Status und Ziel.
 
 const UPSTREAM = 'http://ip.sltv.be:8080';
 const MAX_REDIRECTS = 5;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -13,13 +19,31 @@ const CORS = {
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
 };
 
-// Zugangsdaten in Adressen für Meldungen unkenntlich machen
 const mask = u => String(u)
   .replace(/\/(live|movie|series|timeshift)\/[^/]+\/[^/]+\//, '/$1/***/***/')
   .replace(/(username|password)=[^&]*/g, '$1=***');
 
 const text = (body, status = 200) =>
   new Response(body, { status, headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8' } });
+
+let keyPromise = null;
+function hmacKey(secret) {
+  return keyPromise ??= crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
+async function sign(env, u) {
+  if (!env.SIGN_KEY) return '';
+  const mac = await crypto.subtle.sign('HMAC', await hmacKey(env.SIGN_KEY), new TextEncoder().encode(u));
+  return btoa(String.fromCharCode(...new Uint8Array(mac))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 22);
+}
+async function validSig(env, u, s) {
+  if (!s || !env.SIGN_KEY) return false;
+  const expected = await sign(env, u);
+  if (expected.length !== s.length) return false;
+  let diff = 0;
+  for (let i = 0; i < s.length; i++) diff |= expected.charCodeAt(i) ^ s.charCodeAt(i);
+  return diff === 0;
+}
 
 // Weiterleitungen selbst verfolgen, damit Fehler den betroffenen Schritt nennen
 async function fetchChain(target, headers) {
@@ -55,8 +79,28 @@ function describe(hops) {
   }).join('\n');
 }
 
+// Poster und Senderlogos: http-Bilder kann eine https-Seite nicht anzeigen
+async function image(src) {
+  if (!/^https?:\/\//i.test(src)) return text('Forbidden', 403);
+  let res;
+  try {
+    res = await fetch(src, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 86400, cacheEverything: true } });
+  } catch (e) {
+    return text('Bild nicht erreichbar', 502);
+  }
+  const type = res.headers.get('Content-Type') || '';
+  const len = Number(res.headers.get('Content-Length') || 0);
+  if (!res.ok || !type.startsWith('image/') || len > MAX_IMAGE_BYTES) {
+    res.body?.cancel();
+    return text('Kein Bild', 415);
+  }
+  return new Response(res.body, {
+    headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' },
+  });
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const reqUrl = new URL(request.url);
     const self = reqUrl.origin;
 
@@ -64,8 +108,11 @@ export default {
       return new Response(null, { headers: CORS });
     }
 
+    const img = reqUrl.searchParams.get('img');
+    if (img) return image(img);
+
     const target = reqUrl.searchParams.get('u');
-    if (!target || !target.startsWith(UPSTREAM)) {
+    if (!target || !(target.startsWith(UPSTREAM) || await validSig(env, target, reqUrl.searchParams.get('sig')))) {
       return text('Forbidden', 403);
     }
 
@@ -93,7 +140,7 @@ export default {
           }
         }
       }
-      return text('Proxy-Diagnose\n' + describe(hops) + (error ? '\nAbbruch: ' + error : '') + sample);
+      return text('Proxy-Diagnose (Cloudflare)\n' + describe(hops) + (error ? '\nAbbruch: ' + error : '') + sample);
     }
 
     if (error) {
@@ -101,33 +148,38 @@ export default {
     }
 
     if (!upstream.ok && upstream.status !== 206) {
+      upstream.body?.cancel();
       const via = hops.length > 1 ? ' nach Weiterleitung zu ' + new URL(finalUrl).host : '';
       return text('Upstream HTTP ' + upstream.status + via, upstream.status);
     }
 
     const type = upstream.headers.get('Content-Type') || '';
-    const isPlaylist = target.includes('.m3u8') || type.includes('mpegurl');
-
     const out = new Headers(CORS);
     for (const k of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges']) {
       const v = upstream.headers.get(k);
       if (v) out.set(k, v);
     }
 
-    if (isPlaylist) {
-      // Alle Adressen in der Playlist laufen wieder über diesen Proxy
+    if (type.includes('mpegurl') || /\.m3u8$/.test(new URL(finalUrl).pathname)) {
+      // Alle Adressen in der Playlist laufen wieder über diesen Proxy, signiert
       const base = new URL(finalUrl);
-      const wrap = u => `${self}/?u=${encodeURIComponent(new URL(u, base).toString())}`;
       const body = await upstream.text();
-      const rewritten = body.split('\n').map(line => {
+      const lines = await Promise.all(body.split('\n').map(async line => {
         const t = line.trim();
         if (!t) return line;
-        if (t.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (_, u) => `URI="${wrap(u)}"`);
+        const wrap = async u => {
+          const abs = new URL(u, base).toString();
+          return `${self}/?u=${encodeURIComponent(abs)}&sig=${await sign(env, abs)}`;
+        };
+        if (t.startsWith('#')) {
+          const m = line.match(/URI="([^"]+)"/);
+          return m ? line.replace(m[0], `URI="${await wrap(m[1])}"`) : line;
+        }
         return wrap(t);
-      }).join('\n');
+      }));
       out.set('Content-Type', 'application/vnd.apple.mpegurl');
       out.delete('Content-Length');
-      return new Response(rewritten, { status: upstream.status, headers: out });
+      return new Response(lines.join('\n'), { status: upstream.status, headers: out });
     }
 
     return new Response(upstream.body, { status: upstream.status, headers: out });

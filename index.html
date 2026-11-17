@@ -260,6 +260,7 @@
 const $ = s => document.querySelector(s);
 const enc = encodeURIComponent;
 const HP = window.HOME_PROXY || null;       // gesetzt, wenn die App vom Heim-Proxy kommt
+const DEFAULT_PROXY = 'https://iptv-proxy.keremirmak02.workers.dev';   // für die Nutzung ohne PC
 const ROW_MAX = 30;
 
 function el(tag, cls, text) {
@@ -298,10 +299,16 @@ if (linkProxy && /^https?:\/\//.test(linkProxy)) {
   history.replaceState(null, '', location.pathname);
 }
 
+if (cfg && !HP && !cfg.proxy) cfg.proxy = DEFAULT_PROXY;
+
 const base = () => cfg.server.replace(/\/$/, '');
 const cred = () => `${enc(cfg.user)}/${enc(cfg.pass)}`;
 // Alle Anfragen über den Proxy (Heim-Proxy: gleiche Adresse wie die App)
 const px = url => HP ? `/?u=${enc(url)}` : cfg.proxy ? `${cfg.proxy.replace(/\/$/, '')}/?u=${enc(url)}` : url;
+
+// http-Bilder kann eine https-Seite nicht laden, daher über den Proxy
+const imgSrc = u => !u ? '' : (!HP && location.protocol === 'https:' && /^http:/i.test(u) && cfg?.proxy)
+  ? `${cfg.proxy.replace(/\/$/, '')}/?img=${enc(u)}` : u;
 
 function api(action, extra = '') {
   const url = `${base()}/player_api.php?username=${enc(cfg.user)}&password=${enc(cfg.pass)}` +
@@ -508,7 +515,7 @@ function card(it, o = {}, ctx) {
     const im = new Image();
     im.loading = 'lazy'; im.decoding = 'async'; im.alt = ''; im.referrerPolicy = 'no-referrer';
     im.onerror = () => im.replaceWith(fb);
-    im.src = it.img;
+    im.src = imgSrc(it.img);
     c.append(im);
   } else c.append(fb);
   if (live || o.label) c.append(el('div', 'label', o.label || it.name));
@@ -573,7 +580,7 @@ function lazyGrid(container, items) {
 }
 
 function setBg(node, url) {
-  if (url) node.style.backgroundImage = `url("${String(url).replace(/["\\]/g, encodeURIComponent)}")`;
+  if (url) node.style.backgroundImage = `url("${imgSrc(String(url)).replace(/["\\]/g, encodeURIComponent)}")`;
 }
 
 function fillMeta(meta, d) {
@@ -680,7 +687,7 @@ function renderEpisodes(box, series, d, seasons) {
       const row = navify(el('div', 'ep'));
       const thumb = el('div', 'thumb');
       const src = ep.info?.movie_image || series.img;
-      if (src) { const im = new Image(); im.loading = 'lazy'; im.alt = ''; im.referrerPolicy = 'no-referrer'; im.src = src; im.onerror = () => im.remove(); thumb.append(im); }
+      if (src) { const im = new Image(); im.loading = 'lazy'; im.alt = ''; im.referrerPolicy = 'no-referrer'; im.src = imgSrc(src); im.onerror = () => im.remove(); thumb.append(im); }
       const r = res['e' + ep.id];
       if (r) { const b = el('div', 'bar'), i = el('i'); i.style.width = Math.min(100, r.t / r.d * 100) + '%'; b.append(i); thumb.append(b); }
       const t = el('div', 't'), b = el('b');
@@ -922,7 +929,7 @@ function showLogin() {
   $('#srv').value = cfg?.server || HP?.upstream || '';
   $('#usr').value = cfg?.user || '';
   $('#pw').value = cfg?.pass || '';
-  $('#prx').value = cfg?.proxy || store.get('xtProxy', '') || '';
+  $('#prx').value = cfg?.proxy || store.get('xtProxy', '') || DEFAULT_PROXY;
   $('#prxWrap').hidden = !!HP;
   $('#loginErr').textContent = '';
   ($('#srv').value ? $('#usr').value ? $('#pw') : $('#usr') : $('#srv')).focus();

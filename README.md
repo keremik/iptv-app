@@ -3,6 +3,17 @@
 Web-App für Xtream-Codes-Anbieter, gestaltet wie ein Streamingdienst:
 Titelbild, Reihen pro Kategorie, Details mit Staffeln und Folgen, Weiterschauen, Meine Liste, Suche.
 
+## Ohne PC (iPhone, unterwegs)
+
+https://keremik.github.io/iptv-app/ in Safari öffnen und anmelden.
+Die Proxy-Adresse `https://iptv-proxy.keremirmak02.workers.dev` ist schon eingetragen.
+
+Dabei läuft alles über den Cloudflare-Worker (kostenloser Tarif, es entstehen keine Kosten;
+beim Tageslimit von 100.000 Anfragen hört er einfach auf).
+Sperrt der Anbieter Cloudflare, zeigt die App das als `HTTP 403` an. Dann hilft nur der Heim-Proxy.
+
+Tipp: In Safari auf „Teilen → Zum Home-Bildschirm“ tippen, dann startet die App wie eine normale App.
+
 ## Warum ein Heim-Proxy?
 
 IPTV Smarters ist eine native App und verbindet sich direkt vom Gerät mit dem Anbieter.
@@ -55,4 +66,4 @@ in Chrome oder Edge am PC meistens schon.
 - `index.html`: die ganze Web-App.
 - `proxy/home-proxy.mjs`: Heim-Proxy (Node.js 18+, keine weiteren Pakete).
   Einstellungen per Umgebungsvariable: `UPSTREAM` (Anbieter-Server), `PORT`, `USER_AGENT`.
-- `proxy/worker.js`: älterer Cloudflare-Worker-Proxy, wird nicht mehr gebraucht.
+- `proxy/worker.js`: Cloudflare-Worker für die Nutzung ohne PC. Braucht die geheime Variable `SIGN_KEY`.
