@@ -5,6 +5,14 @@ plugins {
 android {
   namespace = "com.ipflix.app"
   compileSdk = 34
+  signingConfigs {
+    create("release") {
+      storeFile = file("ipflix-release.jks")
+      storePassword = "ipflixapp"
+      keyAlias = "ipflix"
+      keyPassword = "ipflixapp"
+    }
+  }
   defaultConfig {
     applicationId = "com.ipflix.app"
     minSdk = 21
@@ -13,7 +21,10 @@ android {
     versionName = "1.0"
   }
   buildTypes {
-    getByName("release") { isMinifyEnabled = false }
+    getByName("release") {
+      isMinifyEnabled = false
+      signingConfig = signingConfigs.getByName("release")
+    }
     getByName("debug") { isMinifyEnabled = false }
   }
   compileOptions {
@@ -38,4 +49,8 @@ tasks.register<Copy>("syncWeb") {
   from(rootProject.file("../icon.png"))
   into(layout.projectDirectory.dir("src/main/assets/web"))
 }
-tasks.named("preBuild") { dependsOn("syncWeb") }
+tasks.register<Copy>("syncWebLib") {
+  from(rootProject.file("../lib"))
+  into(layout.projectDirectory.dir("src/main/assets/web/lib"))
+}
+tasks.named("preBuild") { dependsOn("syncWeb", "syncWebLib") }

@@ -1,6 +1,7 @@
 package com.ipflix.app
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
@@ -12,6 +13,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -19,6 +21,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -66,7 +70,18 @@ class MainActivity : AppCompatActivity() {
       allowContentAccess = true
       mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
     }
-    webView.webViewClient = WebViewClient()
+    webView.webViewClient = object : WebViewClient() {
+      // Die Oberflaeche bleibt in der App; echte Links (z. B. App Store) oeffnen extern,
+      // damit ein versehentlicher Klick die App nicht ersetzt.
+      override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+        val scheme = request.url.scheme ?: ""
+        if (scheme == "http" || scheme == "https") {
+          try { startActivity(Intent(Intent.ACTION_VIEW, request.url)) } catch (e: Exception) {}
+          return true
+        }
+        return false
+      }
+    }
     webView.webChromeClient = WebChromeClient()
     webView.setBackgroundColor(Color.BLACK)
     webView.addJavascriptInterface(Bridge(), "NativePlayer")
@@ -74,6 +89,13 @@ class MainActivity : AppCompatActivity() {
 
     player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory()).build().also {
       it.addListener(playerListener)
+      // Sauberer Ton-Fokus: bei Anrufen/anderem Ton automatisch pausieren.
+      it.setAudioAttributes(
+        AudioAttributes.Builder()
+          .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+          .setUsage(C.USAGE_MEDIA).build(),
+        true)
+      it.setHandleAudioBecomingNoisy(true)
     }
     playerView = PlayerView(this).apply {
       player = this@MainActivity.player
@@ -131,12 +153,18 @@ class MainActivity : AppCompatActivity() {
     override fun onPlaybackStateChanged(state: Int) {
       if (state == Player.STATE_READY) startTimer()
       if (state == Player.STATE_ENDED) {
-        val tok = playToken
-        runJs("window.__player&&__player.ended&&__player.ended()")
-        // Spielt die Oberflaeche nichts Neues an (z. B. Film zu Ende), Player schliessen.
-        main.postDelayed({
-          if (playToken == tok && player?.playbackState == Player.STATE_ENDED) hidePlayer()
-        }, 1500)
+        if (isLive) {
+          // Live-Stream vom Anbieter beendet: zurueck zur Liste mit Hinweis.
+          runJs("window.__player&&__player.error&&__player.error(" + jsStr("Live-Stream beendet") + ")")
+          hidePlayer()
+        } else {
+          val tok = playToken
+          runJs("window.__player&&__player.ended&&__player.ended()")
+          // Spielt die Oberflaeche nichts Neues an (z. B. Film zu Ende), Player schliessen.
+          main.postDelayed({
+            if (playToken == tok && player?.playbackState == Player.STATE_ENDED) hidePlayer()
+          }, 1500)
+        }
       }
     }
   }
@@ -182,8 +210,9 @@ class MainActivity : AppCompatActivity() {
 
   private val ticker = object : Runnable {
     override fun run() {
+      if (overlay.visibility != View.VISIBLE) return   // gestoppt bis zum naechsten showPlayer
       val p = player
-      if (p != null && overlay.visibility == View.VISIBLE && p.isPlaying) {
+      if (p != null && p.isPlaying && !isLive) {
         val pos = p.currentPosition / 1000.0
         val dur = if (p.duration > 0) p.duration / 1000.0 else 0.0
         runJs("window.__player&&__player.time&&__player.time($pos,$dur)")
@@ -222,7 +251,9 @@ class MainActivity : AppCompatActivity() {
     }
     if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
       webView.evaluateJavascript("(window.__appBack&&window.__appBack())?'1':'0'") { r ->
-        if (r == null || r.trim('"') != "1") finish()
+        // Auf der Startseite die App nur in den Hintergrund legen (Zustand bleibt erhalten),
+        // statt sie zu beenden.
+        if (r == null || r.trim('"') != "1") moveTaskToBack(true)
       }
       return true
     }

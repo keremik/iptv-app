@@ -111,3 +111,22 @@ in Chrome oder Edge am PC meistens schon.
 - Die Seite setzt eine Content-Security-Policy: Skripte nur aus dem eigenen Ordner und von jsdelivr, keine eingebetteten
   Frames, keine fremden Formularziele. Das begrenzt den Schaden, falls ein Anbieter manipulierte Texte liefert.
 - Alle Anzeigetexte des Anbieters werden als Text gesetzt, nie als HTML ausgeführt.
+
+## Als App auf dem Fernseher (Android-Stick)
+
+Im Ordner `android/` liegt eine native Android-TV-App (Paket `com.ipflix.app`). Sie zeigt dieselbe
+Oberfläche in einer WebView, aber die Wiedergabe übernimmt ein eingebauter Player (ExoPlayer), der
+`.mkv`, Live-TS und HLS flüssig abspielt. Der Stream geht direkt an den Anbieter (ohne Proxy); die
+kleinen Datenabfragen und Logos laufen weiter über den Cloudflare-Worker.
+
+- **Bauen:** `cd android && ANDROID_HOME=<sdk> ./gradlew assembleRelease`
+  Ergebnis: `android/app/build/outputs/apk/release/app-release.apk`. Der Bau kopiert `index.html`,
+  `broadcast.json`, `icon.png` und `lib/` automatisch in die App.
+- **Signatur:** fest hinterlegter Schlüssel (`android/app/ipflix-release.jks`), damit spätere Updates
+  sich ohne Neuinstallation über die alte Version legen. Es ist ein reiner Selbstsignatur-Schlüssel
+  für diese persönliche App, kein sensibles Passwort.
+- **Installieren (Stick):** Datei per „Downloader“-App (über einen Link), USB oder „Send Files to TV“
+  auf den Stick bringen und öffnen. In den Android-Einstellungen vorher „Apps aus unbekannten Quellen“
+  für die genutzte App erlauben.
+- **Fernbedienung:** Pfeiltasten, OK, Zurück; im Player Sender hoch/runter, Kanal-Tasten; Zurück auf
+  der Startseite legt die App in den Hintergrund.
