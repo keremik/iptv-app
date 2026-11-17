@@ -145,3 +145,5 @@ an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit ältere
   für die genutzte App erlauben.
 - **Fernbedienung:** Pfeiltasten, OK, Zurück; im Player Sender hoch/runter, Kanal-Tasten; Zurück auf
   der Startseite legt die App in den Hintergrund.
+- **Spulen wie bei Netflix:** Bei Filmen und Serien zweimal schnell rechts/links drücken springt 10 Sekunden
+  vor/zurück, jeder weitere Druck nochmal 10 Sekunden. Einmal drücken zeigt die Steuerung.

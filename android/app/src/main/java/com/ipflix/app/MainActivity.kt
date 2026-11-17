@@ -5,10 +5,14 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.http.HttpResponseCache
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -64,6 +68,12 @@ class MainActivity : AppCompatActivity() {
   private var altUrl = ""
   private var triedAlt = false
   private var isLive = false
+  // Doppelklick links/rechts: 10 Sekunden springen (wie bei Netflix)
+  private lateinit var skipView: TextView
+  private var skipDir = 0
+  private var lastTap = 0L
+  private var skipActive = false
+  private var skipSum = 0
   private var playToken = 0
 
   @SuppressLint("SetJavaScriptEnabled")
@@ -117,7 +127,8 @@ class MainActivity : AppCompatActivity() {
     webView.addJavascriptInterface(Bridge(), "NativePlayer")
     root.addView(webView, matchParent())
 
-    player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory()).build().also {
+    player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory())
+      .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build().also {
       it.addListener(playerListener)
       // Sauberer Ton-Fokus: bei Anrufen/anderem Ton automatisch pausieren.
       it.setAudioAttributes(
@@ -155,6 +166,22 @@ class MainActivity : AppCompatActivity() {
     bar.addView(subtitleView)
     overlay.addView(bar, FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
+    skipView = TextView(this).apply {
+      setTextColor(Color.WHITE); textSize = 24f
+      setPadding(dp(26), dp(14), dp(26), dp(14))
+      background = GradientDrawable().apply { cornerRadius = dp(40).toFloat(); setColor(0xA6000000.toInt()) }
+      visibility = View.GONE
+    }
+    overlay.addView(skipView, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL or Gravity.START))
+    // Touch-Geräte: Doppeltippen links/rechts
+    val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+      override fun onDoubleTap(e: MotionEvent): Boolean {
+        if (isLive) return false
+        skip(if (e.x < playerView.width / 2f) -1 else 1); return true
+      }
+    })
+    playerView.setOnTouchListener { _, e -> taps.onTouchEvent(e); false }
     root.addView(overlay, matchParent())
     infoBar = bar
     // Titel/Programm nur zusammen mit der Steuerung zeigen (und kurz nach Start oder Senderwechsel)
@@ -364,8 +391,29 @@ class MainActivity : AppCompatActivity() {
     if (ms > 0) main.postDelayed(hideInfo, ms)
   }
 
+  private val singleTap = Runnable { if (!skipActive) playerView.showController() }
+  private val endSkip = Runnable { skipActive = false; skipSum = 0; skipView.visibility = View.GONE }
+  private fun skip(dir: Int) {
+    val p = player ?: return
+    if (!skipActive || skipDir != dir) { skipSum = 0 }
+    skipActive = true; skipDir = dir
+    val dur = if (p.duration > 0) p.duration else Long.MAX_VALUE
+    val target = (p.currentPosition + dir * 10_000L).coerceIn(0L, maxOf(0L, dur - 1_000L))
+    p.seekTo(target)
+    skipSum += 10
+    skipView.text = if (dir > 0) "$skipSum Sek.  »" else "«  $skipSum Sek."
+    (skipView.layoutParams as FrameLayout.LayoutParams).apply {
+      gravity = Gravity.CENTER_VERTICAL or (if (dir > 0) Gravity.END else Gravity.START)
+      setMargins(dp(90), 0, dp(90), 0)
+      skipView.layoutParams = this
+    }
+    skipView.visibility = View.VISIBLE
+    main.removeCallbacks(endSkip); main.postDelayed(endSkip, 1300)
+  }
+
   private fun hidePlayer() {
     playToken++
+    main.removeCallbacks(singleTap); main.removeCallbacks(endSkip); endSkip.run()
     val wasShown = overlay.visibility == View.VISIBLE
     player?.let { it.playWhenReady = false; it.stop(); it.clearMediaItems() }
     overlay.visibility = View.GONE
@@ -426,6 +474,20 @@ class MainActivity : AppCompatActivity() {
             runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true
           }
         }
+      }
+      // Filme/Serien: zweimal schnell links/rechts = 10 s springen; einmal = Steuerung zeigen
+      if (!isLive && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) &&
+          (skipActive || !playerView.isControllerFullyVisible)) {
+        if (down && event.repeatCount == 0) {
+          val dir = if (k == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
+          val now = SystemClock.uptimeMillis()
+          main.removeCallbacks(singleTap)
+          if (skipActive && skipDir == dir) skip(dir)
+          else if (skipDir == dir && now - lastTap < 450) skip(dir)
+          else { skipActive = false; main.postDelayed(singleTap, 450) }
+          skipDir = dir; lastTap = now
+        }
+        return true
       }
       // alles andere (OK, links/rechts zum Spulen, Play/Pause) bekommt nur der Player
       playerView.dispatchKeyEvent(event)
