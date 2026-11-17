@@ -116,13 +116,41 @@ function sniffImage(b) {
   return '';
 }
 
+// SSRF-Schutz für den Bild-Proxy: private, lokale und Metadaten-Adressen sind tabu,
+// damit der Proxy nicht zum Abtasten fremder Netze missbraucht werden kann.
+function isPrivateIp(ip) {
+  const m = ip.split('.').map(Number);
+  if (m.length !== 4 || m.some(x => isNaN(x) || x < 0 || x > 255)) return false;
+  const [a, b] = m;
+  return a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+function unsafeImageHost(host) {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (/^\[?::1\]?$/.test(h) || /^\[?(fc|fd|fe80|fe9|fea|feb)/i.test(h)) return true;
+  // auch IP-in-DNS-Formen wie 10.0.0.1.nip.io erkennen
+  const ipm = h.match(/(\d{1,3}(?:\.\d{1,3}){3})(?:\.(?:nip|sslip)\.io)?$/);
+  return ipm ? isPrivateIp(ipm[1]) : false;
+}
+const OK_PORTS = ['', '80', '443', '8080', '8443', '8880'];
+
 async function image(src) {
   if (!/^https?:\/\//i.test(src)) return text('Forbidden', 403);
-  let res;
-  try {
-    res = await fetchUrl(src, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*' }, cf: { cacheTtl: 86400, cacheEverything: true } });
-  } catch (e) {
-    return text('Bild nicht erreichbar', 502);
+  let url = src, res;
+  for (let i = 0; i < 3; i++) {                       // Weiterleitungen einzeln prüfen
+    let u;
+    try { u = new URL(url); } catch (e) { return text('Forbidden', 403); }
+    if (unsafeImageHost(u.hostname) || OK_PORTS.indexOf(u.port) < 0) return text('Forbidden', 403);
+    try {
+      res = await fetchUrl(u.toString(), { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*' }, redirect: 'manual', cf: { cacheTtl: 86400, cacheEverything: true } });
+    } catch (e) {
+      return text('Bild nicht erreichbar', 502);
+    }
+    const loc = res.headers.get('Location');
+    if (res.status >= 300 && res.status < 400 && loc) { res.body?.cancel(); url = new URL(loc, u).toString(); continue; }
+    break;
   }
   const len = Number(res.headers.get('Content-Length') || 0);
   if (!res.ok || !res.body || len > MAX_IMAGE_BYTES) {

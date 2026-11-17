@@ -102,3 +102,12 @@ in Chrome oder Edge am PC meistens schon.
 - `proxy/home-proxy.mjs`: Heim-Proxy (Node.js 18+, keine weiteren Pakete).
   Einstellungen per Umgebungsvariable: `UPSTREAM` (Anbieter-Server), `PORT`, `USER_AGENT`.
 - `proxy/worker.js`: Cloudflare-Worker für die Nutzung ohne PC. Braucht die geheime Variable `SIGN_KEY`.
+
+## Sicherheit und Daten
+
+- Die App speichert Zugangsdaten, Verlauf und Empfehlungen nur im Browser (localStorage). Sie sendet nichts davon an Dritte.
+- Der Proxy leitet nur an den einen Anbieter weiter und an Adressen, die er selbst signiert hat. Der Bild-Proxy
+  liefert nur echte Bilder aus und blockiert private, lokale und Metadaten-Adressen (Schutz gegen Missbrauch, SSRF).
+- Die Seite setzt eine Content-Security-Policy: Skripte nur aus dem eigenen Ordner und von jsdelivr, keine eingebetteten
+  Frames, keine fremden Formularziele. Das begrenzt den Schaden, falls ein Anbieter manipulierte Texte liefert.
+- Alle Anzeigetexte des Anbieters werden als Text gesetzt, nie als HTML ausgeführt.
