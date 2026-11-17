@@ -1,6 +1,8 @@
 package com.ipflix.app
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -84,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     }
     webView.webChromeClient = WebChromeClient()
     webView.setBackgroundColor(Color.BLACK)
+    webView.overScrollMode = View.OVER_SCROLL_NEVER   // kein Überzieh-Glühen, spart Zeichenaufwand
     webView.addJavascriptInterface(Bridge(), "NativePlayer")
     root.addView(webView, matchParent())
 
@@ -171,6 +174,16 @@ class MainActivity : AppCompatActivity() {
 
   inner class Bridge {
     @JavascriptInterface fun isApp(): Boolean = true
+    // Schwaches Geraet? Dann schaltet die Oberflaeche teure Effekte ab und laedt weniger auf einmal.
+    @JavascriptInterface fun lite(): Boolean {
+      return try {
+        val am = applicationContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        if (am.isLowRamDevice) return true
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        mi.totalMem in 1..1_600_000_000L
+      } catch (e: Exception) { false }
+    }
     @JavascriptInterface fun play(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
       main.post { showPlayer(url, live, title, startSec, alt) }
     }

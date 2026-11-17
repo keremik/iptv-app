@@ -236,6 +236,15 @@
     .login-card { padding: 32px 22px; }
   }
 
+  /* ---- Sparmodus fuer schwache Geraete: teure Effekte aus (Schatten, Weichzeichner) ---- */
+  .lite .card { transition: transform .15s ease; }
+  .lite .card:hover, .lite .card:focus, .lite .card:focus-visible { box-shadow: none; }
+  .lite .chan .logo img { -webkit-filter: none; filter: none; }
+  .lite .chan .logo img, .lite .chan .ctext, .lite .chan .cname,
+  .lite .chan:hover .logo img, .lite .chan:focus .logo img, .lite .chan:focus-visible .logo img,
+  .lite nav, .lite .searchbox, .lite .searchbox input { transition: none; }
+  .lite .spinner { animation-duration: 1.4s; }
+
   /* ---- Ältere Browser (z. B. Fernseher mit Chrome 77): Ersatz für neuere CSS-Funktionen ---- */
   @supports not (aspect-ratio: 1 / 1) {
     .card.poster::before { content: ''; display: block; padding-top: 150%; }
@@ -327,8 +336,13 @@
 
 <div id="toast" role="status" hidden><span id="toastText"></span><span id="toastActs"></span><button class="iconbtn" id="toastClose" aria-label="Schließen">×</button></div>
 
-<script src="lib/hls.min.js"></script>
-<script src="lib/mpegts.js"></script>
+<script>
+// In der Android-App spielt der native Player; die Browser-Bibliotheken werden dort nicht geladen.
+if (!(window.NativePlayer && window.NativePlayer.play)) {
+  document.write('<script src="lib/hls.min.js"><\/script>');
+  document.write('<script src="lib/mpegts.js"><\/script>');
+}
+</script>
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -338,6 +352,9 @@ const DEFAULT_PROXY = 'https://iptv-proxy.keremirmak02.workers.dev';   // für d
 
 // Läuft die Oberfläche in der Android-App (Stick)? Dann spielt ein nativer Player (ExoPlayer) ab.
 const APP = !!(window.NativePlayer && window.NativePlayer.play);
+// Schwaches Geraet (z. B. 1080p-Stick): teure Effekte aus, weniger Bilder gleichzeitig.
+const LITE = !!(APP && window.NativePlayer.lite && (function () { try { return window.NativePlayer.lite(); } catch (e) { return false; } })());
+try { if (LITE) document.documentElement.classList.add('lite'); } catch (e) {}
 let appPos = 0, appDur = 0;
 const curTime = () => APP ? appPos : video.currentTime;
 const curDur = () => APP ? appDur : video.duration;
@@ -362,7 +379,7 @@ window.__player = {
   switch: function (step) { switchChannel(+step); },
 };
 function nativeSubtitle(t) { if (APP && window.NativePlayer.subtitle) { try { window.NativePlayer.subtitle(t || ''); } catch (e) {} } }
-const ROW_MAX = 30;
+const ROW_MAX = LITE ? 16 : 30;
 
 // Ältere Browser (Fernseher) erkennen: kein Flexbox-"gap", kein :focus-visible
 (function () {
@@ -1135,15 +1152,15 @@ function lazyRows(container, defs) {
   let i = 0;
   const sentinel = el('div');
   container.append(sentinel);
-  const io = new IntersectionObserver(es => { if (es[0].isIntersecting) { add(4); check(); } }, { rootMargin: '700px' });
+  const io = new IntersectionObserver(es => { if (es[0].isIntersecting) { add(LITE ? 2 : 4); check(); } }, { rootMargin: LITE ? '300px' : '700px' });
   const add = n => {
     for (const end = Math.min(i + n, defs.length); i < end; i++) container.insertBefore(buildRow(defs[i]), sentinel);
     if (i >= defs.length) { io.disconnect(); sentinel.remove(); }
   };
   const check = () => requestAnimationFrame(() => {
-    if (i < defs.length && sentinel.isConnected && sentinel.getBoundingClientRect().top < innerHeight + 700) { add(4); check(); }
+    if (i < defs.length && sentinel.isConnected && sentinel.getBoundingClientRect().top < innerHeight + (LITE ? 300 : 700)) { add(LITE ? 2 : 4); check(); }
   });
-  add(6);
+  add(LITE ? 3 : 6);
   if (sentinel.isConnected) io.observe(sentinel);
 }
 
@@ -1152,13 +1169,13 @@ function lazyGrid(container, items) {
   const sentinel = el('div');
   container.append(g, sentinel);
   let i = 0;
-  const io = new IntersectionObserver(es => { if (es[0].isIntersecting) { add(); check(); } }, { rootMargin: '900px' });
+  const io = new IntersectionObserver(es => { if (es[0].isIntersecting) { add(); check(); } }, { rootMargin: LITE ? '400px' : '900px' });
   const add = () => {
-    for (const end = Math.min(i + 120, items.length); i < end; i++) g.append(card(items[i], undefined, items));
+    for (const end = Math.min(i + (LITE ? 40 : 120), items.length); i < end; i++) g.append(card(items[i], undefined, items));
     if (i >= items.length) { io.disconnect(); sentinel.remove(); }
   };
   const check = () => requestAnimationFrame(() => {
-    if (i < items.length && sentinel.isConnected && sentinel.getBoundingClientRect().top < innerHeight + 900) { add(); check(); }
+    if (i < items.length && sentinel.isConnected && sentinel.getBoundingClientRect().top < innerHeight + (LITE ? 400 : 900)) { add(); check(); }
   });
   add();
   if (sentinel.isConnected) io.observe(sentinel);
@@ -1744,8 +1761,9 @@ function move(dir) {
   }
   if (!best) return;
   best.focus({ preventScroll: true });
-  if (best.closest('nav')) window.scrollTo({ top: 0, behavior: 'smooth' });
-  else best.scrollIntoView({ block: dir === 'up' || dir === 'down' ? 'center' : 'nearest', inline: 'nearest', behavior: 'smooth' });
+  const sb = LITE ? 'auto' : 'smooth';
+  if (best.closest('nav')) window.scrollTo({ top: 0, behavior: sb });
+  else best.scrollIntoView({ block: dir === 'up' || dir === 'down' ? 'center' : 'nearest', inline: 'nearest', behavior: sb });
 }
 
 // Fernbedienungen melden Tasten teils nur als Zahlencode
