@@ -38,6 +38,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -55,6 +56,7 @@ class MainActivity : AppCompatActivity() {
   private lateinit var playerView: PlayerView
   private lateinit var titleView: TextView
   private lateinit var subtitleView: TextView
+  private lateinit var infoBar: View
   private var player: ExoPlayer? = null
   private lateinit var assetLoader: WebViewAssetLoader
   private val main = Handler(Looper.getMainLooper())
@@ -132,6 +134,8 @@ class MainActivity : AppCompatActivity() {
       resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
       setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
       setBackgroundColor(Color.BLACK)
+      isFocusable = true
+      isFocusableInTouchMode = true
     }
     overlay = FrameLayout(this).apply {
       visibility = View.GONE
@@ -140,6 +144,7 @@ class MainActivity : AppCompatActivity() {
     overlay.addView(playerView, matchParent())
 
     val bar = LinearLayout(this).apply {
+      visibility = View.GONE
       orientation = LinearLayout.VERTICAL
       setPadding(dp(28), dp(18), dp(28), dp(18))
       setBackgroundColor(0xB3000000.toInt())
@@ -151,8 +156,16 @@ class MainActivity : AppCompatActivity() {
     overlay.addView(bar, FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
     root.addView(overlay, matchParent())
+    infoBar = bar
+    // Titel/Programm nur zusammen mit der Steuerung zeigen (und kurz nach Start oder Senderwechsel)
+    playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
+      if (v == View.VISIBLE) showInfo(0) else showInfo(1500)
+    })
 
     setContentView(root)
+    // Fernbedienung soll sofort in der Oberflaeche landen (sonst reagiert der erste Tastendruck nicht)
+    webView.requestFocus()
+    if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) WebView.setWebContentsDebuggingEnabled(true)
     webView.loadUrl("https://" + WebViewAssetLoader.DEFAULT_DOMAIN + "/assets/web/index.html")
   }
 
@@ -205,6 +218,12 @@ class MainActivity : AppCompatActivity() {
 
   private val playerListener = object : Player.Listener {
     override fun onPlayerError(error: PlaybackException) {
+      val p = player
+      // Live zu lange pausiert ("hinter dem Live-Fenster"): einfach wieder am aktuellen Live-Punkt einsteigen
+      if (p != null && error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+        p.seekToDefaultPosition(); p.prepare(); p.playWhenReady = true
+        return
+      }
       if (altUrl.isNotEmpty() && !triedAlt) {
         triedAlt = true
         player?.let { p ->
@@ -212,7 +231,7 @@ class MainActivity : AppCompatActivity() {
         }
       } else {
         hidePlayer()
-        runJs("window.__player&&__player.error&&__player.error(" + jsStr(error.errorCodeName) + ")")
+        runJs("window.__player&&__player.error&&__player.error(" + jsStr(friendlyError(error)) + ")")
       }
     }
 
@@ -242,7 +261,57 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  // Verstaendliche Fehlermeldung statt technischem Code
+  private fun friendlyError(e: PlaybackException): String {
+    var c: Throwable? = e.cause
+    while (c != null) {
+      if (c is HttpDataSource.InvalidResponseCodeException) {
+        val code = c.responseCode
+        return when (code) {
+          401, 403 -> "Der Anbieter lehnt den Stream ab (HTTP $code). Oft läuft schon ein Stream auf einem anderen Gerät, oder das Abo ist abgelaufen."
+          404 -> "Diesen Stream gibt es beim Anbieter nicht mehr (HTTP 404)."
+          else -> "Der Anbieter meldet einen Fehler (HTTP $code)."
+        }
+      }
+      c = c.cause
+    }
+    return when (e.errorCode) {
+      PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+      PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Keine Verbindung zum Anbieter. Internet prüfen und erneut versuchen."
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+      PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+      PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+      PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES -> "Dieses Format kann das Gerät nicht abspielen. Eine andere Variante (z. B. HD statt 4K) probieren."
+      else -> "Wiedergabe nicht möglich. Bitte erneut versuchen."
+    }
+  }
+
+  // Aktuelle Position an die Oberflaeche melden (fuer "Weiterschauen")
+  private fun reportTime() {
+    val p = player ?: return
+    if (isLive || overlay.visibility != View.VISIBLE) return
+    val pos = p.currentPosition / 1000.0
+    val dur = if (p.duration > 0) p.duration / 1000.0 else 0.0
+    if (pos > 0) runJs("window.__player&&__player.time&&__player.time($pos,$dur)")
+  }
+
+  // Bevorzugte Tonspur/Untertitel nach den gewaehlten Sprachen (z. B. Deutsch vor Tuerkisch)
+  private val ISO = mapOf("de" to listOf("de"), "tr" to listOf("tr"), "en" to listOf("en"), "fr" to listOf("fr"),
+    "ar" to listOf("ar"), "ku" to listOf("ku"), "es" to listOf("es"), "it" to listOf("it"), "pl" to listOf("pl"),
+    "nl" to listOf("nl"), "pt" to listOf("pt"), "ru" to listOf("ru"), "bk" to listOf("sr", "hr", "bs"), "al" to listOf("sq"))
+  private fun applyLangs(csv: String) {
+    val p = player ?: return
+    val codes = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.flatMap { ISO[it] ?: listOf(it) }
+    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+      .setPreferredAudioLanguages(*codes.toTypedArray())
+      .setPreferredTextLanguages(*codes.toTypedArray())
+      .build()
+  }
+
   inner class Bridge {
+    @JavascriptInterface fun langs(csv: String) { main.post { applyLangs(csv) } }
     @JavascriptInterface fun isApp(): Boolean = true
     // Schwaches Geraet? Dann schaltet die Oberflaeche teure Effekte ab und laedt weniger auf einmal.
     @JavascriptInterface fun lite(): Boolean {
@@ -262,6 +331,7 @@ class MainActivity : AppCompatActivity() {
       main.post {
         subtitleView.text = text
         subtitleView.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        if (overlay.visibility == View.VISIBLE && text.isNotEmpty() && !playerView.isControllerFullyVisible) showInfo(6000)
       }
     }
   }
@@ -278,17 +348,34 @@ class MainActivity : AppCompatActivity() {
     p.playWhenReady = true
     overlay.visibility = View.VISIBLE
     overlay.bringToFront()
+    webView.isFocusable = false
+    webView.isFocusableInTouchMode = false
     playerView.requestFocus()
+    showInfo(6000)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     startTimer()
   }
 
+  private val hideInfo = Runnable { if (!playerView.isControllerFullyVisible) infoBar.visibility = View.GONE }
+  // ms = 0: sichtbar lassen (Steuerung offen); sonst nach ms ausblenden
+  private fun showInfo(ms: Long) {
+    main.removeCallbacks(hideInfo)
+    infoBar.visibility = View.VISIBLE
+    if (ms > 0) main.postDelayed(hideInfo, ms)
+  }
+
   private fun hidePlayer() {
     playToken++
+    val wasShown = overlay.visibility == View.VISIBLE
     player?.let { it.playWhenReady = false; it.stop(); it.clearMediaItems() }
     overlay.visibility = View.GONE
     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    webView.requestFocus()
+    // Fokus nur zurueckgeben, wenn der Player wirklich offen war (sonst springt die Auswahl unnoetig)
+    if (wasShown || !webView.isFocusable) {
+      webView.isFocusable = true
+      webView.isFocusableInTouchMode = true
+      webView.requestFocus()
+    }
   }
 
   private val ticker = object : Runnable {
@@ -310,47 +397,69 @@ class MainActivity : AppCompatActivity() {
     "\"" + (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    val k = event.keyCode
+    val down = event.action == KeyEvent.ACTION_DOWN
     if (overlay.visibility == View.VISIBLE) {
-      if (event.action == KeyEvent.ACTION_DOWN) {
-        when (event.keyCode) {
-          KeyEvent.KEYCODE_BACK -> {
-            hidePlayer(); runJs("window.__player&&__player.back&&__player.back()"); return true
-          }
+      // Lautstaerke & Co. bleiben beim System
+      if (k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN || k == KeyEvent.KEYCODE_VOLUME_MUTE) {
+        return super.dispatchKeyEvent(event)
+      }
+      if (k == KeyEvent.KEYCODE_BACK) {
+        if (down && event.repeatCount == 0) {
+          reportTime()
+          hidePlayer(); runJs("window.__player&&__player.back&&__player.back()")
+        }
+        return true
+      }
+      if (down && event.repeatCount == 0) {
+        when (k) {
           KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_NEXT -> {
             runJs("window.__player&&__player.switch&&__player.switch(1)"); return true
           }
           KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
             runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true
           }
-          KeyEvent.KEYCODE_DPAD_UP -> if (isLive) {
+          KeyEvent.KEYCODE_DPAD_UP -> if (isLive && !playerView.isControllerFullyVisible) {
             runJs("window.__player&&__player.switch&&__player.switch(1)"); return true
           }
-          KeyEvent.KEYCODE_DPAD_DOWN -> if (isLive) {
+          KeyEvent.KEYCODE_DPAD_DOWN -> if (isLive && !playerView.isControllerFullyVisible) {
             runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true
           }
         }
       }
-      return super.dispatchKeyEvent(event)
+      // alles andere (OK, links/rechts zum Spulen, Play/Pause) bekommt nur der Player
+      playerView.dispatchKeyEvent(event)
+      return true
     }
-    if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
-      webView.evaluateJavascript("(window.__appBack&&window.__appBack())?'1':'0'") { r ->
-        // Auf der Startseite die App nur in den Hintergrund legen (Zustand bleibt erhalten),
-        // statt sie zu beenden.
-        if (r == null || r.trim('"') != "1") moveTaskToBack(true)
+    if (k == KeyEvent.KEYCODE_BACK) {
+      if (down && event.repeatCount == 0) {
+        webView.evaluateJavascript("(window.__appBack&&window.__appBack())?'1':'0'") { r ->
+          // Auf der Startseite die App nur in den Hintergrund legen (Zustand bleibt erhalten).
+          if (r == null || r.trim('"') != "1") moveTaskToBack(true)
+        }
       }
       return true
+    }
+    // OK auf einem Eingabefeld oeffnet die Bildschirmtastatur: Oberflaeche schiebt das Feld nach oben
+    if (!down && (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+      val handled = super.dispatchKeyEvent(event)
+      runJs("window.__kbd&&__kbd()")
+      return handled
     }
     return super.dispatchKeyEvent(event)
   }
 
   // App verlassen (z. B. Home-Taste): Sehzeit und Fortschritt sichern; beim Zurueckkommen neu beginnen
   override fun onPause() {
+    reportTime()
     runJs("window.__player&&__player.hidden&&__player.hidden()")
     super.onPause(); player?.pause()
   }
   override fun onResume() {
     super.onResume()
     runJs("window.__player&&__player.shown&&__player.shown()")
+    val p = player
+    if (p != null && isLive && overlay.visibility == View.VISIBLE) { p.seekToDefaultPosition(); p.play() }
   }
 
   override fun onDestroy() {

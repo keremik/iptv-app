@@ -91,7 +91,7 @@
           background: rgba(20,20,20,.55); color: #fff; font-size: 44px; line-height: 1; opacity: .55; transition: opacity .2s; }
   .chev.l { left: 0; } .chev.r { right: 0; }
   .chev:hover { opacity: 1; background: rgba(20,20,20,.8); }
-  @media (hover: none) and (pointer: coarse) { .chev { display: none; } }
+  @media (hover: none) { .chev { display: none; } }   /* Handy und Fernseher: keine Mauspfeile */
   .card { flex: 0 0 auto; position: relative; border-radius: 4px; overflow: hidden; background: var(--card); cursor: pointer;
           scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease; }
   .card.poster { width: 13.5vw; width: clamp(112px, 13.5vw, 210px); aspect-ratio: 2 / 3; }
@@ -203,6 +203,8 @@
   #toast a { margin-top: 10px; padding: 8px 16px; font-size: 15px; text-decoration: none; white-space: normal; }
 
   /* Anmeldung */
+  /* TV-Bildschirmtastatur deckt die untere Bildhälfte ab: Platz schaffen, Feld nach oben holen */
+  body.kbd #login, body.kbd #setup { padding-bottom: 60vh; }
   #login, #setup { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 96px 16px 40px;
            background: radial-gradient(ellipse at top, #3b0d12, var(--bg) 65%); }
   .login-card { width: 100%; max-width: 450px; background: rgba(0,0,0,.75); padding: 48px 56px; border-radius: 6px; display: flex; flex-direction: column; gap: 14px; }
@@ -403,7 +405,9 @@ const curDur = () => APP ? appDur : video.duration;
 
 // Der Stream geht in der App direkt an den Anbieter (ohne Proxy), das übernimmt der native Player.
 function nativeStart(src, live, name) {
-  stopPlayback();
+  // Player nicht schliessen: der native Player tauscht den Stream direkt aus (kein Aufblitzen beim Umschalten)
+  streamSession++;
+  resetPlayers();
   let startSec = 0;
   if (!live && nowPlaying && nowPlaying.seek) { startSec = nowPlaying.seek; nowPlaying.seek = 0; }
   appPos = 0; appDur = 0;
@@ -619,6 +623,8 @@ function setLangs(list) {
   LANG_PREFIX = new RegExp(`^\\s*(?:[\\[(|]+\\s*[A-Za-z]{2,4}\\s*[-:]?\\s*[\\])|]+|(?:${all})\\s*[-:|★•]+)\\s*`);
   const sp = Object.keys(codes).filter(c => SPACE_SAFE.has(c)).join('|');
   CHAN_SPACE = new RegExp(`^(?:${sp})\\s+(?=\\S)`);
+  // bevorzugte Tonspur im nativen Player (z. B. Deutsch vor Türkisch)
+  if (APP && window.NativePlayer.langs) { try { window.NativePlayer.langs(langs.slice().sort((a, b) => LANG_KEYS.indexOf(a) - LANG_KEYS.indexOf(b)).join(',')); } catch (e) {} }
 }
 setLangs(langs);
 
@@ -794,7 +800,7 @@ function decayPrefs() {
   const now = Date.now(), last = prefs.decayTs || now;
   const f = Math.pow(0.5, (now - last) / (30 * 864e5));
   if (f < 0.999) {
-    ['cat', 'genre'].forEach(t => Object.keys(prefs[t]).forEach(k => {
+    ['cat', 'genre'].forEach(t => Object.keys(prefs[t] || (prefs[t] = {})).forEach(k => {
       prefs[t][k] *= f;
       if (prefs[t][k] < 0.05) delete prefs[t][k];
     }));
@@ -832,7 +838,7 @@ const byAppeal = items => [...items].sort((a, b) =>
 // mehr Punkte = öfter in der Reihe. Schon Gesehenes kommt nicht noch einmal.
 function recommend(kind, items, max) {
   const pre = kind + ':';
-  const top = (t, n) => Object.keys(prefs[t]).filter(k => k.startsWith(pre))
+  const top = (t, n) => Object.keys(prefs[t] || {}).filter(k => k.startsWith(pre))
     .map(k => ({ t, v: k.slice(pre.length), s: prefs[t][k] })).sort((a, b) => b.s - a.s).slice(0, n);
   const cats = top('cat', 4).concat(top('genre', 3));
   if (!cats.length) return [];
@@ -915,8 +921,10 @@ function pushOverlay(close) {
   history.pushState({ overlay: true, name: current, id: argId }, '');
 }
 
+let renderFailed = false;
 async function render(name, arg) {
   const token = ++viewToken;
+  renderFailed = false;
   current = name; currentArg = arg;
   if (name !== 'search') { $('#q').value = ''; $('.searchbox').classList.remove('open'); }
   document.querySelectorAll('.links button').forEach(b => b.classList.toggle('on', b.dataset.view === name));
@@ -943,12 +951,23 @@ async function render(name, arg) {
     const defs = (v.rows || []).filter(d => d && d.items && d.items.length);
     lazyRows(rows, defs);
     if (!defs.length && !(v.sections || []).some(s => s.items.length)) rows.append(el('p', 'empty', v.empty || 'Hier gibt es noch nichts.'));
+    // Fernbedienung: sofort eine sichtbare Auswahl (Abspielen oder erste Kachel), statt erst nach dem ersten Tastendruck
+    const a = document.activeElement;
+    if (!a || a === document.body || a === $('#brand')) {
+      const first = main.querySelector('.hero .btn.play, #rows .card');
+      if (first && name === 'home') first.focus();
+    }
   } catch (e) {
     if (token !== viewToken) return;
     main.className = 'plain';
-    const p = el('p', 'empty', 'Fehler beim Laden: ' + e.message);
-    p.style.paddingTop = '110px';
-    setKids(main, p);
+    const box = el('div', 'empty');
+    box.style.paddingTop = '110px';
+    const again = button('btn play', 'Erneut versuchen', () => render(name, arg));
+    again.style.marginTop = '16px';
+    box.append(el('p', null, 'Laden fehlgeschlagen: ' + friendlyErr(e)), again);
+    setKids(main, box);
+    renderFailed = true;
+    again.focus();
   }
 }
 
@@ -1773,7 +1792,7 @@ async function playSeriesStart(it) {
 async function nextEpisode(e) {
   try {
     const d = await getSeriesInfo(e.seriesId);
-    const all = Object.keys(d.episodes || {}).sort((a, b) => a - b).flatMap(s => d.episodes[s].map(ep => ({ ep, s })));
+    const all = Object.keys(d.episodes || {}).sort((a, b) => a - b).reduce((acc, s) => acc.concat((d.episodes[s] || []).map(ep => ({ ep, s }))), []);
     const i = all.findIndex(x => String(x.ep.id) === String(e.id));
     if (i >= 0 && all[i + 1] && nowPlaying && nowPlaying.e === e) {
       toast('Nächste Folge ...');
@@ -1861,6 +1880,28 @@ function showLogin() {
   ($('#srv').value ? $('#usr').value ? $('#pw') : $('#usr') : $('#srv')).focus();
 }
 
+// Verständliche Fehlermeldungen statt technischer Codes
+function friendlyErr(e) {
+  const m = String((e && e.message) || e || '');
+  if (/HTTP 502|Failed to fetch|NetworkError|Load failed|nicht erreichbar|timeout/i.test(m))
+    return 'Der Server des Anbieters ist nicht erreichbar. Adresse, Port und Internetverbindung prüfen.';
+  if (/HTTP 40[13]/.test(m)) return 'Der Anbieter verweigert den Zugriff (' + m.match(/HTTP \d+/)[0] + ').';
+  if (/HTTP 404/.test(m)) return 'Unter dieser Adresse gibt es keinen IPTV-Dienst (HTTP 404). Adresse prüfen.';
+  if (/JSON|Unexpected token|Unexpected end/i.test(m)) return 'Der Server antwortet nicht wie ein IPTV-Anbieter (Xtream Codes). Adresse prüfen.';
+  return m;
+}
+const isNetErr = e => /HTTP 5\d\d|Failed to fetch|NetworkError|Load failed|nicht erreichbar|timeout/i.test(String((e && e.message) || e || ''));
+
+// Abo abgelaufen oder gesperrt: deutlich sagen, statt dass einfach nichts läuft
+function accountWarning(i) {
+  if (!i) return;
+  const exp = +i.exp_date ? +i.exp_date * 1000 : 0;
+  const expired = exp && exp < Date.now();
+  if (expired || (i.status && i.status !== 'Active')) {
+    toast(`Hinweis: Dein Abo beim Anbieter ist ${expired ? 'am ' + fmtDate(i.exp_date) + ' abgelaufen' : 'nicht aktiv (' + i.status + ')'}. ` +
+      'Sender und Filme laufen dann eventuell nicht.', true);
+  }
+}
 // Server-Feld: normale Adresse ("server:8080", ohne http:// geht auch) oder kompletter M3U-Link
 function parseLogin(srv, user, pass) {
   let s = String(srv || '').trim();
@@ -1890,13 +1931,14 @@ $('#loginForm').onsubmit = async e => {
     const d = await api('');
     if (!d.user_info || d.user_info.auth != 1) throw new Error('Anmeldung abgelehnt. Benutzername oder Passwort prüfen.');
     info = d.user_info;
+    accountWarning(info);
     store.set('xt', cfg);
     clearCache();
     if (!store.get('setupDone', false)) showSetup(true);
     else go('home', null, 'replace');
   } catch (err) {
     cfg = old;
-    $('#loginErr').textContent = 'Fehler: ' + err.message;
+    $('#loginErr').textContent = friendlyErr(err);
   }
 };
 
@@ -1913,7 +1955,7 @@ $('#avatar').onclick = e => {
 $('#mPrefs').onclick = () => {
   $('#menu').hidden = true;
   if (!confirm('Gemerkte Sender und Vorlieben löschen? Die Empfehlungen beginnen dann von vorn.')) return;
-  prefs = { chan: {}, cat: {}, seen: {}, last: {} };
+  prefs = { chan: {}, cat: {}, seen: {}, last: {}, genre: {} };
   savePrefs();
   toast('Empfehlungen zurückgesetzt.');
   render(current, currentArg);
@@ -2004,6 +2046,34 @@ $('#q').addEventListener('input', debounce(() => {
   if (q.length >= 2) go('search', q, current === 'search' ? 'replace' : 'push');
   else if (!q && current === 'search') history.back();
 }, 300));
+// In der App: Eingabefeld über die Bildschirmtastatur schieben, sobald sie aufgeht (OK auf dem Feld) oder getippt wird
+if (APP) {
+  const isForm = t => t && t.matches && t.matches('#login input, #setup input');
+  const lift = t => {
+    if (!isForm(t)) return;
+    if (!document.body.classList.contains('kbd')) document.body.classList.add('kbd');
+    setTimeout(() => { const r = t.getBoundingClientRect(); if (r.top < 90 || r.bottom > innerHeight * 0.42) window.scrollTo(0, Math.max(0, r.top + window.pageYOffset - 120)); }, 60);
+  };
+  window.__kbd = () => lift(document.activeElement);   // vom nativen Teil nach OK auf einem Feld
+  document.addEventListener('click', e => lift(e.target), true);
+  document.addEventListener('input', e => lift(e.target), true);
+  // Bekommt die Oberfläche den Fokus zurück (Start, nach dem Player), setzt Android die Auswahl sonst auf das Logo oben links
+  let lastFocus = null;
+  document.addEventListener('focusin', e => { if (e.target !== $('#brand')) lastFocus = e.target; });
+  window.addEventListener('focus', () => {
+    const want = lastFocus;
+    setTimeout(() => {
+      const a = document.activeElement;
+      if (a && a !== document.body && a !== $('#brand')) return;
+      const scr = !$('#login').hidden ? $('#login') : !$('#setup').hidden ? $('#setup') : null;
+      if (want && want.isConnected && want.getClientRects().length && !want.closest('[hidden]') && (!scr || scr.contains(want))) want.focus();
+      else if (scr) { const f = scr.querySelector('input'); if (f) f.focus(); }
+    }, 60);
+  });
+  document.addEventListener('focusout', e => {
+    if (isForm(e.target)) setTimeout(() => { if (!isForm(document.activeElement)) document.body.classList.remove('kbd'); }, 0);
+  });
+}
 $('#q').addEventListener('blur', () => { if (!$('#q').value) $('.searchbox').classList.remove('open'); });
 
 window.addEventListener('scroll', () => $('#nav').classList.toggle('solid', scrollY > 30), { passive: true });
@@ -2112,10 +2182,22 @@ if (cfg) {
   history.replaceState({ name: 'home', id: 0 }, '');
   if (!store.get('setupDone', false)) showSetup(true);
   else { showApp(); render('home', null); }
-  api('').then(d => {
-    if (!d.user_info || d.user_info.auth != 1) throw new Error('Anmeldung abgelehnt');
+  // Beim Einschalten ist das WLAN oft noch nicht da: mehrmals versuchen, nur bei abgelehnten
+  // Zugangsdaten zur Anmeldung wechseln.
+  const startupCheck = attempt => api('').then(d => {
+    if (!d.user_info || d.user_info.auth != 1) {
+      toast('Der Anbieter hat die Anmeldung abgelehnt. Bitte Zugangsdaten prüfen.', true);
+      showLogin();
+      return;
+    }
     info = d.user_info;
-  }).catch(e => { toast('Verbindung fehlgeschlagen: ' + e.message, true); showLogin(); });
+    accountWarning(info);
+    if (renderFailed && !$('#main').hidden) render(current, currentArg);   // jetzt mit Verbindung neu laden
+  }).catch(e => {
+    if (isNetErr(e) && attempt < 5) { setTimeout(() => startupCheck(attempt + 1), 3000); return; }
+    toast(friendlyErr(e), true);
+  });
+  startupCheck(1);
 } else {
   showLogin();
 }

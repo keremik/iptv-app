@@ -131,8 +131,8 @@ seines eigenen Anbieters an. Die App läuft komplett auf dem Gerät und braucht 
 
 Im Ordner `android/` liegt eine native Android-TV-App (Paket `com.ipflix.app`). Sie zeigt dieselbe
 Oberfläche in einer WebView, aber die Wiedergabe übernimmt ein eingebauter Player (ExoPlayer), der
-`.mkv`, Live-TS und HLS flüssig abspielt. Der Stream geht direkt an den Anbieter (ohne Proxy); die
-kleinen Datenabfragen und Logos laufen weiter über den Cloudflare-Worker.
+`.mkv`, Live-TS und HLS flüssig abspielt. Streams, Datenabfragen und Logos gehen direkt vom Stick
+an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit älteren Android-WebViews (ab Chrome 66).
 
 - **Bauen:** `cd android && ANDROID_HOME=<sdk> ./gradlew assembleRelease`
   Ergebnis: `android/app/build/outputs/apk/release/app-release.apk`. Der Bau kopiert `index.html`,

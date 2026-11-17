@@ -17,15 +17,15 @@ android {
     applicationId = "com.ipflix.app"
     minSdk = 21
     targetSdk = 34
-    versionCode = 4
-    versionName = "1.3"
+    versionCode = 5
+    versionName = "1.4"
   }
   buildTypes {
     getByName("release") {
       isMinifyEnabled = false
       signingConfig = signingConfigs.getByName("release")
     }
-    getByName("debug") { isMinifyEnabled = false }
+    getByName("debug") { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("release") }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
