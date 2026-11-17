@@ -1,4 +1,4 @@
-# IPTV Player
+# IPFLIX
 
 Web-App für Xtream-Codes-Anbieter, gestaltet wie ein Streamingdienst:
 Titelbild, Reihen pro Kategorie, Details mit Staffeln und Folgen, Weiterschauen, Meine Liste, Suche.
@@ -18,7 +18,7 @@ Tipp: In Safari auf „Teilen → Zum Home-Bildschirm“ tippen, dann startet di
 
 1. Am TV die App „Browser“ öffnen und `keremik.github.io/iptv-app` eintippen, dann anmelden.
 2. Als App-Kachel auf dem Startbildschirm (klappt nicht bei jeder Software-Version):
-   im TV-Browser `hisense://debug` eintippen, als Name `IPTV Player` und als Adresse
+   im TV-Browser `hisense://debug` eintippen, als Name `IPFLIX` und als Adresse
    `https://keremik.github.io/iptv-app/` eintragen, bei Symbol-Feldern
    `https://keremik.github.io/iptv-app/icon.png`, dann „Install“.
 

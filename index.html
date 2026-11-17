@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#141414">
-<title>IPTV Player</title>
+<title>IPFLIX</title>
 <link rel="icon" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
 <!--HOME_PROXY-->
@@ -26,7 +26,7 @@
   nav { position: fixed; top: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: center; gap: 28px;
         padding: 16px var(--pad); background: linear-gradient(rgba(0,0,0,.75), transparent); transition: background .3s; }
   nav.solid { background: var(--bg); }
-  .brand { color: var(--accent); font-weight: 900; font-size: 26px; letter-spacing: 1px; text-transform: uppercase;
+  .brand { color: var(--accent); font-weight: 900; font-size: 28px; letter-spacing: 2px; text-transform: uppercase;
            background: none; border: 0; cursor: pointer; padding: 0; white-space: nowrap; text-align: left; }
   .links { display: flex; gap: 20px; flex: 1; min-width: 0; }
   .links button { background: none; border: 0; color: #e5e5e5; font-size: 15px; cursor: pointer; padding: 4px 0; white-space: nowrap; }
@@ -93,16 +93,11 @@
   .card { flex: 0 0 auto; position: relative; border-radius: 4px; overflow: hidden; background: var(--card); cursor: pointer;
           scroll-snap-align: start; transition: transform .25s ease, box-shadow .25s ease; }
   .card.poster { width: 13.5vw; width: clamp(112px, 13.5vw, 210px); aspect-ratio: 2 / 3; }
-  .card.wide { width: 18.5vw; width: clamp(170px, 18.5vw, 300px); aspect-ratio: 16 / 9; }
   .card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .card.logo { background: linear-gradient(135deg, #333, #1c1c1c); }
-  .card.logo img { object-fit: contain; padding: 12% 22% 22%; }
   .card .label { position: absolute; left: 0; right: 0; bottom: 0; padding: 24px 9px 8px; font-size: 13px; font-weight: 700;
                  background: linear-gradient(transparent, rgba(0,0,0,.9)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .fallback { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; text-align: center;
                     padding: 12px; font-weight: 700; font-size: 15px; background: linear-gradient(160deg, #3a3a3a, #1a1a1a); }
-  .card.logo .fallback { background: none; }
-  .card.logo .fallback ~ .label { display: none; }
   .card .bar { position: absolute; left: 9px; right: 9px; bottom: 4px; height: 3px; background: rgba(255,255,255,.3); }
   .card .bar i { display: block; height: 100%; background: var(--accent); }
   .card.has-bar .label { padding-bottom: 12px; }
@@ -110,11 +105,33 @@
   @media (hover: hover) { .card:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 10px 24px rgba(0,0,0,.75); } }
   .card:focus-visible { transform: scale(1.08); z-index: 3; outline: 3px solid #fff; outline-offset: 0; }
 
+  /* Sender: Logo ohne Kasten, Name darunter */
+  .card.chan { width: 12.5vw; width: clamp(116px, 12.5vw, 196px); background: none; overflow: visible; border-radius: 12px;
+               padding: 12px 10px 10px; text-align: center; transition: background .2s ease; }
+  .chan .logo { position: relative; padding-top: 54%; }
+  .chan .logo img, .chan .ctext { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .chan .logo img { object-fit: contain; -webkit-filter: drop-shadow(0 4px 10px rgba(0,0,0,.6)); filter: drop-shadow(0 4px 10px rgba(0,0,0,.6));
+                    transition: transform .25s ease; }
+  .chan .ctext { display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 800; font-size: 17px;
+                 line-height: 1.15; letter-spacing: .4px; color: #f2f2f2; transition: transform .25s ease; }
+  .chan .cname { margin-top: 10px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                 transition: color .2s ease; }
+  .chan.nologo .cname { visibility: hidden; }
+  @media (hover: hover) {
+    .card.chan:hover { transform: none; box-shadow: none; background: rgba(255,255,255,.07); }
+    .chan:hover .logo img, .chan:hover .ctext { transform: scale(1.12); }
+    .chan:hover .cname { color: #fff; }
+  }
+  .card.chan:focus-visible { transform: none; outline: 2px solid rgba(255,255,255,.9); background: rgba(255,255,255,.1); }
+  .chan:focus-visible .logo img, .chan:focus-visible .ctext { transform: scale(1.12); }
+  .chan:focus-visible .cname { color: #fff; }
+  .more-card.chan { display: flex; align-items: center; justify-content: center; color: var(--link); font-size: 14px; }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
           grid-template-columns: repeat(auto-fill, minmax(clamp(112px, 13.5vw, 210px), 1fr));
           gap: 18px var(--gap); padding: 12px var(--pad) 30px; }
-  .grid.wide { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-               grid-template-columns: repeat(auto-fill, minmax(clamp(170px, 18.5vw, 300px), 1fr)); }
+  .grid.chan { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+               grid-template-columns: repeat(auto-fill, minmax(clamp(116px, 12.5vw, 196px), 1fr)); }
   .grid .card { width: auto; }
   .empty { color: var(--muted); margin: 30px var(--pad); font-size: 16px; }
   .spinner { width: 52px; height: 52px; margin: 40vh auto; border: 4px solid #333; border-top-color: var(--accent);
@@ -216,8 +233,7 @@
   /* ---- Ältere Browser (z. B. Fernseher mit Chrome 77): Ersatz für neuere CSS-Funktionen ---- */
   @supports not (aspect-ratio: 1 / 1) {
     .card.poster::before { content: ''; display: block; padding-top: 150%; }
-    .card.wide::before { content: ''; display: block; padding-top: 56.25%; }
-    .card img { position: absolute; top: 0; left: 0; }
+    .card.poster img { position: absolute; top: 0; left: 0; }
     .modal .top::before { content: ''; padding-top: 56.25%; }
     .ep .thumb { height: 79px; }
     @media (max-width: 760px) { .ep .thumb { height: 62px; } }
@@ -225,6 +241,9 @@
   /* kein :focus-visible: Auswahl mit der Fernbedienung trotzdem sichtbar machen */
   .no-fv :focus { outline: 3px solid #fff; outline-offset: 2px; }
   .no-fv .card:focus { transform: scale(1.08); z-index: 3; outline-offset: 0; }
+  .no-fv .card.chan:focus { transform: none; outline: 2px solid rgba(255,255,255,.9); background: rgba(255,255,255,.1); }
+  .no-fv .chan:focus .logo img, .no-fv .chan:focus .ctext { transform: scale(1.12); }
+  .no-fv .chan:focus .cname { color: #fff; }
   .no-fv .ep:focus { background: #333; }
   .no-fv #menu button:focus { text-decoration: underline; outline: none; }
   /* kein "gap" in Flexbox: Abstände über Ränder */
@@ -246,7 +265,7 @@
 <body class="auth">
 
 <nav id="nav">
-  <button class="brand" id="brand" data-view="home">IPTV Player</button>
+  <button class="brand" id="brand" data-view="home">IPFLIX</button>
   <div class="links">
     <button data-view="home">Startseite</button>
     <button data-view="live">Live TV</button>
@@ -394,12 +413,37 @@ const memo = {};
 const once = (key, fn) => memo[key] || (memo[key] = fn().catch(e => { delete memo[key]; throw e; }));
 const arr = a => Array.isArray(a) ? a : [];
 
+// Anbieter-Namen aufräumen: "(DE-) The Mummy - 2026" -> "The Mummy" (Jahr 2026), "DE: RTL HD" -> "RTL HD"
+const LANG_PREFIX = /^\s*(?:[\[(|]+\s*[A-Za-z]{2,4}\s*[-:]?\s*[\])|]+|(?:DE|GER|TR|TUR|AT|EN|FR)\s*[-:|★•]+)\s*/;
+const YEAR_SUFFIX = /\s*(?:[-–|]\s*|\()((?:19|20)\d{2})\)?\s*$/;
+function pretty(name) {
+  const raw = String(name || '');
+  let title = raw.replace(LANG_PREFIX, '').trim(), yr = '';
+  const m = title.match(YEAR_SUFFIX);
+  if (m && m.index > 0) { yr = m[1]; title = title.slice(0, m.index).trim(); }
+  return { title: title || raw, year: yr };
+}
+const chanName = name => String(name || '').replace(LANG_PREFIX, '').trim() || String(name || '');
+// Kategorie: Kürzel weg, GROSSBUCHSTABEN lesbar machen, türkische Kategorien kennzeichnen
+function prettyCat(name) {
+  const raw = String(name || '');
+  const lead = fold(raw).split(/[^a-z0-9]+/).filter(Boolean)[0];
+  let t = raw.replace(LANG_PREFIX, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
+  if (t === t.toUpperCase()) {
+    t = t.replace(/[^\s\/|&+\-]+/g, w => w.length <= 3 || /\d/.test(w) ? w : w.charAt(0) + w.slice(1).replace(/İ/g, 'i').toLowerCase());
+  }
+  if ((lead === 'tr' || lead === 'tur') && t !== raw) t += ' · Türkisch';
+  return t;
+}
+
 function norm(k, x) {
-  if (k === 'live') return { kind: 'live', id: x.stream_id, name: x.name || '', img: x.stream_icon, cat: x.category_id, num: +x.num || 0 };
-  if (k === 'movie') return { kind: 'movie', id: x.stream_id, name: x.name || '', img: x.stream_icon, cat: x.category_id,
-    ext: x.container_extension || 'mp4', rating: x.rating, added: +x.added || 0, year: year(x.year || x.releasedate) };
-  return { kind: 'series', id: x.series_id, name: x.name || '', img: x.cover, cat: x.category_id, plot: x.plot, genre: x.genre,
-    rating: x.rating, year: year(x.releaseDate || x.release_date), backdrop: first(x.backdrop_path), added: +x.last_modified || 0 };
+  const raw = x.name || '';
+  if (k === 'live') return { kind: 'live', id: x.stream_id, name: chanName(raw), raw, img: x.stream_icon, cat: x.category_id, num: +x.num || 0 };
+  const p = pretty(raw);
+  if (k === 'movie') return { kind: 'movie', id: x.stream_id, name: p.title, raw, img: x.stream_icon, cat: x.category_id,
+    ext: x.container_extension || 'mp4', rating: x.rating, added: +x.added || 0, year: year(x.year || x.releasedate) || p.year };
+  return { kind: 'series', id: x.series_id, name: p.title, raw, img: x.cover, cat: x.category_id, plot: x.plot, genre: x.genre,
+    rating: x.rating, year: year(x.releaseDate || x.release_date) || p.year, backdrop: first(x.backdrop_path), added: +x.last_modified || 0 };
 }
 const getCats = k => once('c' + k, () => api(CAT[k][0]).then(arr));
 const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => arr(a).map(x => norm(k, x))));
@@ -430,7 +474,7 @@ async function grouped(k) {
   let items = all;
   if (langOnly) {
     const ok = new Set(cats.filter(c => catLangOk(c.category_name)).map(c => String(c.category_id)));
-    const f = all.filter(it => ok.has(String(it.cat)) || itemLangOk(it.name));
+    const f = all.filter(it => ok.has(String(it.cat)) || itemLangOk(it.raw));
     if (f.length) items = f;
     else if (all.length && !langMiss.has(k)) {
       langMiss.add(k);
@@ -444,7 +488,7 @@ async function grouped(k) {
     by.get(c).push(it);
   }
   const groups = cats.filter(c => by.has(String(c.category_id)))
-                     .map(c => ({ title: c.category_name, items: by.get(String(c.category_id)) }));
+                     .map(c => ({ title: prettyCat(c.category_name), items: by.get(String(c.category_id)) }));
   const known = new Set(cats.map(c => String(c.category_id)));
   const rest = items.filter(it => !known.has(String(it.cat)));
   if (rest.length) groups.push({ title: 'Weitere', items: rest });
@@ -531,6 +575,9 @@ async function render(name, arg) {
   }
 }
 
+// Überschrift auf der Startseite: "Filme · Kino Action", ohne Dopplung wie "Serien · Serien"
+const rowTitle = (label, title) => fold(title).includes(fold(label).slice(0, 4)) ? title : `${label} · ${title}`;
+
 const VIEWS = {
   async home() {
     const res = await settle(['movie', 'series', 'live'].map(grouped));
@@ -539,11 +586,11 @@ const VIEWS = {
     const rows = [resumeRow(), favRow(),
       { title: 'Neu bei Filmen', items: newest(M.items).slice(0, 60) },
       { title: 'Neue Serien', items: newest(S.items).slice(0, 60) }];
-    if (L.groups[0]) rows.push({ title: 'Live TV: ' + L.groups[0].title, items: L.groups[0].items });
+    if (L.groups[0]) rows.push({ title: rowTitle('Live TV', L.groups[0].title), items: L.groups[0].items });
     for (let i = 0; i < 6; i++) {
-      if (M.groups[i]) rows.push({ title: 'Filme: ' + M.groups[i].title, items: M.groups[i].items });
-      if (S.groups[i]) rows.push({ title: 'Serien: ' + S.groups[i].title, items: S.groups[i].items });
-      if (L.groups[i + 1] && i < 3) rows.push({ title: 'Live TV: ' + L.groups[i + 1].title, items: L.groups[i + 1].items });
+      if (M.groups[i]) rows.push({ title: rowTitle('Filme', M.groups[i].title), items: M.groups[i].items });
+      if (S.groups[i]) rows.push({ title: rowTitle('Serien', S.groups[i].title), items: S.groups[i].items });
+      if (L.groups[i + 1] && i < 3) rows.push({ title: rowTitle('Live TV', L.groups[i + 1].title), items: L.groups[i + 1].items });
     }
     return { hero: hero(pickHero(M.items) || pickHero(S.items)), rows };
   },
@@ -561,7 +608,7 @@ const VIEWS = {
   },
   async mylist() {
     const r = resumeRow();
-    return { title: 'Meine Liste', rows: r ? [r] : [], sections: [{ items: favs() }],
+    return { title: 'Meine Liste', rows: r ? [r] : [], sections: [{ items: (favRow() || { items: [] }).items }],
              empty: 'Noch nichts gespeichert. In den Details eines Films oder einer Serie auf „+“ tippen.' };
   },
   async grid(a) {
@@ -571,7 +618,7 @@ const VIEWS = {
     const [m, s, l] = (await settle(['movie', 'series', 'live'].map(k => grouped(k).then(g => g.items))))
       .map(r => r.status === 'fulfilled' ? r.value : []);
     const n = fold(q);
-    const hit = items => items.filter(it => fold(it.name).includes(n)).slice(0, 60);
+    const hit = items => items.filter(it => fold(it.name).includes(n) || fold(it.raw).includes(n)).slice(0, 60);
     return { title: `Ergebnisse für „${q}“`, empty: 'Keine Treffer.',
              sections: [{ title: 'Filme', items: hit(m) }, { title: 'Serien', items: hit(s) }, { title: 'Live TV', items: hit(l) }] };
   },
@@ -582,12 +629,12 @@ function resumeRow() {
   if (!list.length) return null;
   return {
     id: 'row-resume', title: 'Weiterschauen',
-    items: list.map(e => ({ kind: 'resume', name: e.name, img: e.img, e })),
-    cardOpts: it => ({ label: it.e.sub || it.e.name, progress: it.e.t / it.e.d, onClick: () => playVod(it.e, it.e.t) }),
+    items: list.map(e => ({ kind: 'resume', name: pretty(e.name).title, img: e.img, e })),
+    cardOpts: it => ({ label: it.e.sub || it.name, progress: it.e.t / it.e.d, onClick: () => playVod(it.e, it.e.t) }),
   };
 }
 function favRow() {
-  const f = favs();
+  const f = favs().map(x => Object.assign({}, x, { name: pretty(x.name).title }));
   return f.length ? { title: 'Meine Liste', items: f } : null;
 }
 function refreshResumeRow() {
@@ -599,25 +646,35 @@ function refreshResumeRow() {
 }
 
 /* ---------- Bausteine ---------- */
+function lazyImg(src, onFail) {
+  const im = new Image();
+  im.loading = 'lazy'; im.decoding = 'async'; im.alt = ''; im.referrerPolicy = 'no-referrer';
+  im.onerror = onFail;
+  im.src = imgSrc(src);
+  return im;
+}
+
 function card(it, o = {}, ctx) {
   const live = it.kind === 'live';
-  const c = navify(el('div', 'card ' + (live ? 'wide logo' : 'poster')));
+  const c = navify(el('div', 'card ' + (live ? 'chan' : 'poster')));
   c.setAttribute('aria-label', it.name);
+  c.onclick = o.onClick || (() => openItem(it, ctx));
+  if (live) {
+    // Sender: Logo frei auf dem Hintergrund, Name darunter
+    const logo = el('div', 'logo');
+    const noLogo = () => { setKids(logo, el('div', 'ctext', it.name)); c.classList.add('nologo'); };
+    if (it.img) logo.append(lazyImg(it.img, noLogo)); else noLogo();
+    c.append(logo, el('div', 'cname', it.name));
+    return c;
+  }
   const fb = el('div', 'fallback', it.name);
-  if (it.img) {
-    const im = new Image();
-    im.loading = 'lazy'; im.decoding = 'async'; im.alt = ''; im.referrerPolicy = 'no-referrer';
-    im.onerror = () => im.replaceWith(fb);
-    im.src = imgSrc(it.img);
-    c.append(im);
-  } else c.append(fb);
-  if (live || o.label) c.append(el('div', 'label', o.label || it.name));
+  if (it.img) { const im = lazyImg(it.img, () => im.replaceWith(fb)); c.append(im); } else c.append(fb);
+  if (o.label) c.append(el('div', 'label', o.label));
   if (o.progress > 0) {
     const b = el('div', 'bar'), i = el('i');
     i.style.width = Math.min(100, o.progress * 100) + '%';
     b.append(i); c.append(b); c.classList.add('has-bar');
   }
-  c.onclick = o.onClick || (() => openItem(it, ctx));
   return c;
 }
 
@@ -631,7 +688,7 @@ function buildRow(d) {
   const s = el('div', 'slider');
   for (const it of d.items.slice(0, ROW_MAX)) s.append(card(it, d.cardOpts && d.cardOpts(it), d.items));
   if (more) {
-    const m = navify(el('div', 'card more-card ' + (d.items[0].kind === 'live' ? 'wide' : 'poster'), `Alle ${d.items.length} ›`));
+    const m = navify(el('div', 'card more-card ' + (d.items[0].kind === 'live' ? 'chan' : 'poster'), `Alle ${d.items.length} ›`));
     m.onclick = showAll;
     s.append(m);
   }
@@ -664,7 +721,7 @@ function lazyRows(container, defs) {
 }
 
 function lazyGrid(container, items) {
-  const g = el('div', 'grid' + (items[0] && items[0].kind === 'live' ? ' wide' : ''));
+  const g = el('div', 'grid' + (items[0] && items[0].kind === 'live' ? ' chan' : ''));
   const sentinel = el('div');
   container.append(g, sentinel);
   let i = 0;
@@ -793,7 +850,7 @@ function renderEpisodes(box, series, d, seasons) {
       const r = res['e' + ep.id];
       if (r) { const b = el('div', 'bar'), i = el('i'); i.style.width = Math.min(100, r.t / r.d * 100) + '%'; b.append(i); thumb.append(b); }
       const t = el('div', 't'), b = el('b');
-      b.append(el('span', null, ep.title || `Folge ${ep.episode_num || idx + 1}`), el('span', null, inf.duration || ''));
+      b.append(el('span', null, chanName(ep.title) || `Folge ${ep.episode_num || idx + 1}`), el('span', null, inf.duration || ''));
       t.append(b, el('p', null, inf.plot || ''));
       row.append(el('span', 'n', String(ep.episode_num || idx + 1)), thumb, t);
       row.onclick = () => playEpisode(series, ep, s);
@@ -959,7 +1016,7 @@ function playMovie(it) {
 
 function playEpisode(series, ep, season) {
   const e = { key: 'e' + ep.id, kind: 'ep', id: ep.id, ext: ep.container_extension || 'mp4', name: series.name,
-              sub: `S${season} F${ep.episode_num || ''} · ${ep.title || ''}`.replace(/ · $/, ''), img: series.img,
+              sub: `S${season} F${ep.episode_num || ''} · ${chanName(ep.title)}`.replace(/ · $/, ''), img: series.img,
               seriesId: series.id, season };
   playVod(e, (resumeOf(e.key) || {}).t);
 }
