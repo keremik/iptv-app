@@ -356,13 +356,19 @@
     </div>
     <div class="sgroup">
       <h3>Maximale Auflösung</h3>
-      <p class="hint">Bei einfachen Full-HD-Sticks „Full HD“ wählen, dann werden 4K-Varianten ausgeblendet.</p>
+      <p class="hint">„Automatisch“ spielt immer die beste Variante (beim Xiaomi TV Stick 4K bis 4K). Ruckelt 4K, „Full HD“ wählen.</p>
       <div class="chips" id="resChips"></div>
     </div>
     <div class="sgroup">
       <h3>Darstellung</h3>
       <p class="hint">Der Sparmodus schaltet Effekte ab und macht schwache Geräte flüssiger.</p>
       <div class="chips" id="liteChips"></div>
+    </div>
+    <div class="sgroup" id="afrGroup">
+      <h3>Bildwiederholrate</h3>
+      <p class="hint">Stellt den Fernseher auf die Bildrate der Sendung ein (z. B. 50 Hz bei Fußball). Bewegungen laufen
+        dann ohne Ruckeln. Beim Umschalten wird das Bild kurz schwarz.</p>
+      <div class="chips" id="afrChips"></div>
     </div>
     <button class="btn red" type="submit">Fertig</button>
   </form>
@@ -424,6 +430,8 @@ window.__player = {
     var h = nowPlaying && nowPlaying.endHandler; if (h) h();
   },
   back: function () { closePlayer(); },
+  // Sender gestört: automatisch auf eine andere Variante desselben Senders (oder einen Sender mit demselben Spiel)
+  failover: function (msg) { failover(msg); },
   error: function (msg) { endLive(); toast('Wiedergabe-Fehler: ' + (msg || ''), true); closePlayer(); },
   playing: function () { markPlaying(); },
   // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
@@ -479,6 +487,10 @@ function applyLite() {
   try { document.documentElement.classList.toggle('lite', LITE); } catch (e) {}
 }
 applyLite();
+// Bildwiederholrate des Fernsehers an die Sendung anpassen (nur App)
+let afrMode = store.get('afrMode', 'on');
+function applyAfr() { if (APP && window.NativePlayer.afr) { try { window.NativePlayer.afr(afrMode !== 'off'); } catch (e) {} } }
+applyAfr();
 const first = x => Array.isArray(x) ? x[0] : x;
 const year = s => (String(s || '').match(/\d{4}/) || [''])[0];
 const fold = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -566,10 +578,11 @@ function norm(k, x) {
     rating: x.rating, year: year(x.releaseDate || x.release_date) || p.year, backdrop: first(x.backdrop_path), added: +x.last_modified || 0 };
 }
 const getCats = k => once('c' + k, () => api(CAT[k][0]).then(arr));
-const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => arr(a).filter(x => !isPlaceholder(x.name)).map(x => norm(k, x))));
+const ITEMS = {};   // bereits geladene Listen (für sofortigen Zugriff ohne Warten)
+const getItems = k => once('i' + k, () => api(CAT[k][1]).then(a => (ITEMS[k] = arr(a).filter(x => !isPlaceholder(x.name)).map(x => norm(k, x)))));
 const getVodInfo = id => once('v' + id, () => api('get_vod_info', '&vod_id=' + enc(id)));
 const getSeriesInfo = id => once('s' + id, () => api('get_series_info', '&series_id=' + enc(id)));
-const clearCache = () => { for (const k in memo) delete memo[k]; };
+const clearCache = () => { for (const k in memo) delete memo[k]; for (const k in ITEMS) delete ITEMS[k]; };
 
 /* ---------- Sprachen ----------
    words: Wortanfänge im Kategorienamen, safe: eindeutige Kürzel überall,
@@ -871,7 +884,8 @@ function becauseRow(kind, items) {
 // gibt es einen Film in mehreren Sprachen, nur die bevorzugte Fassung (Reihenfolge: Deutsch, Türkisch, ...).
 // Die Kategorien bleiben davon unberührt.
 const langRank = k => { const i = LANG_KEYS.indexOf(k); return i < 0 ? 99 : i; };
-const workKey = it => it.tmdb ? 't' + it.tmdb : fold(it.name).replace(/[^a-z0-9]/g, '') + '|' + (it.year || '');
+const QWORDS = /\b(4k|uhd|2160p|fhd|1080p|hd|720p|sd|hevc|h265|x265|hdr|multi)\b/g;
+const workKey = it => it.tmdb ? 't' + it.tmdb : fold(it.name).replace(QWORDS, '').replace(/[^a-z0-9]/g, '') + '|' + (it.year || '');
 const suggMemo = { src: null, langs: '', out: null };
 function sugg(items) {
   if (!langs.length) return items;
@@ -881,7 +895,9 @@ function sugg(items) {
   for (const it of items) {
     if (langs.indexOf(it.lang) < 0) continue;
     const k = workKey(it), cur = best.get(k);
-    if (!cur || langRank(it.lang) < langRank(cur.lang)) best.set(k, it);
+    // bevorzugte Sprache zuerst, bei gleicher Sprache die beste Auflösung
+    if (!cur || langRank(it.lang) < langRank(cur.lang) ||
+        (langRank(it.lang) === langRank(cur.lang) && quality(it.raw || it.name).rank > quality(cur.raw || cur.name).rank)) best.set(k, it);
   }
   const keep = new Set(best.values());
   const out = items.filter(it => keep.has(it));
@@ -1131,6 +1147,7 @@ function matchBox(live, all) {
     if (!m) return;
     matchChannels(m, live, all || live).then(res => {
       const items = res.best.concat(res.others).slice(0, 24);
+      matchBest.clear(); res.best.forEach(x => matchBest.add(String(x.id)));
       const now = Date.now(), day = dayKey(m.ts) === dayKey(now) ? 'Heute' : dayKey(m.ts) === dayKey(now + 864e5) ? 'Morgen' : fmtDay(m.ts);
       const meta = [leagueName(m.league), `${day}, ${fmtClock(m.ts)} Uhr`, m.venue].filter(Boolean).join(' · ');
       const row = items.length ? buildRow({ title: '', items }) : el('section', 'row');
@@ -1723,6 +1740,29 @@ function playLive(it, list) {
   loadEpg(it);
 }
 
+const matchBest = new Set();   // Sender, die laut Programm gerade das Spiel des Lieblingsvereins zeigen
+function failover(msg) {
+  const np = nowPlaying;
+  if (!np || !np.live) { window.__player.error(msg); return; }
+  const tried = np.tried || new Set([String(np.it.id)]);
+  getItems('live').then(all => {
+    if (nowPlaying !== np) return;
+    const key = chanKey(np.it.name);
+    let cand = byQuality(capVariants(all.filter(x => chanKey(x.name) === key))).filter(x => !tried.has(String(x.id)));
+    if (!cand.length && matchBest.has(String(np.it.id))) cand = byQuality(all.filter(x => matchBest.has(String(x.id)) && !tried.has(String(x.id))));
+    const next = cand[0];
+    if (!next) { window.__player.error(msg + ' Kein gleichwertiger Ersatzsender gefunden.'); return; }
+    tried.add(String(next.id));
+    const list = np.list.slice();
+    if (list.indexOf(next) < 0) list[np.idx >= 0 ? np.idx : 0] = next;
+    const lbl = quality(next.raw || next.name).label;
+    toast(next.name === np.it.name ? `${np.it.name} ist gestört. Weiter auf einer anderen Variante${lbl ? ' (' + lbl + ')' : ''}.`
+                                   : `${np.it.name} ist gestört. Weiter auf ${next.name}.`);
+    playLive(next, list);
+    nowPlaying.tried = tried;
+  }).catch(() => window.__player.error(msg));
+}
+
 function switchChannel(step) {
   const np = nowPlaying;
   if (!np || !np.live || np.list.length < 2) return;
@@ -1767,6 +1807,13 @@ function playVod(e, at) {
 }
 
 function playMovie(it) {
+  // App: gibt es denselben Film in derselben Sprache in besserer Auflösung (z. B. 4K), diese Fassung spielen
+  if (APP && !resumeOf('m' + it.id) && ITEMS.movie) {
+    try {
+      const all = ITEMS.movie, k = workKey(it), q = x => quality(x.raw || x.name).rank;
+      it = all.filter(x => x.lang === it.lang && workKey(x) === k).reduce((b, x) => q(x) > q(b) ? x : b, it);
+    } catch (err) {}
+  }
   const e = { key: 'm' + it.id, kind: 'movie', id: it.id, ext: it.ext || 'mp4', name: it.name, img: it.img, cat: it.cat, genre: it.genre };
   playVod(e, (resumeOf(e.key) || {}).t);
 }
@@ -1961,7 +2008,8 @@ $('#mPrefs').onclick = () => {
   render(current, currentArg);
 };
 /* ---------- Einstellungen (beim ersten Start und über das Menü) ---------- */
-let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto';
+let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto', sAfr = 'on';
+const AFR_OPTS = [['on', 'Anpassen (flüssiger)'], ['off', 'Nicht ändern']];
 const RES_OPTS = [[0, 'Automatisch'], [4, '4K'], [3, 'Full HD'], [2, 'HD']];
 const LITE_OPTS = [['auto', 'Automatisch'], ['on', 'Sparmodus an'], ['off', 'Volle Effekte']];
 function chipRow(box, opts, pressed, tap) {
@@ -1975,7 +2023,7 @@ function chipRow(box, opts, pressed, tap) {
   $(box).pressed = pressed;
 }
 function syncChips() {
-  ['#langChips', '#resChips', '#liteChips'].forEach(id => {
+  ['#langChips', '#resChips', '#liteChips', '#afrChips'].forEach(id => {
     const box = $(id);
     [...box.children].forEach(b => b.setAttribute('aria-pressed', box.pressed(b.dataset.v) ? 'true' : 'false'));
   });
@@ -1990,12 +2038,14 @@ function showSetup(firstRun) {
   $('#setupTitle').textContent = firstRun ? 'Willkommen! Kurz einrichten' : 'Einstellungen';
   $('#teamIn').value = team || '';
   $('#teamRes').textContent = '';
-  sLangs = langs.slice(); sRes = maxRes; sLite = liteMode;
+  sLangs = langs.slice(); sRes = maxRes; sLite = liteMode; sAfr = afrMode;
+  $('#afrGroup').hidden = !APP;
   chipRow('#langChips', [['all', 'Alle Sprachen']].concat(LANG_KEYS.map(k => [k, LANGS[k].label])),
     v => v === 'all' ? !sLangs.length : sLangs.indexOf(v) >= 0,
     v => { if (v === 'all') sLangs = []; else sLangs = sLangs.indexOf(v) >= 0 ? sLangs.filter(x => x !== v) : sLangs.concat(v); });
   chipRow('#resChips', RES_OPTS, v => +v === sRes, v => { sRes = +v; });
   chipRow('#liteChips', LITE_OPTS, v => v === sLite, v => { sLite = v; });
+  chipRow('#afrChips', AFR_OPTS, v => v === sAfr, v => { sAfr = v; });
   syncChips();
   $('#teamIn').focus();
 }
@@ -2021,6 +2071,7 @@ $('#setupForm').onsubmit = e => {
   setLangs(sLangs);
   maxRes = sRes; store.set('maxRes', maxRes);
   liteMode = sLite; store.set('liteMode', liteMode); applyLite();
+  afrMode = sAfr; store.set('afrMode', afrMode); applyAfr();
   store.set('setupDone', true);
   if (langChanged) { langMiss.clear(); clearCache(); }
   toast('Einstellungen gespeichert.');

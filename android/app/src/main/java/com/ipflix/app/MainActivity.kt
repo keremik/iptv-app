@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.http.HttpResponseCache
 import android.os.Bundle
 import android.os.Handler
@@ -43,7 +46,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -65,9 +74,20 @@ class MainActivity : AppCompatActivity() {
   private lateinit var assetLoader: WebViewAssetLoader
   private val main = Handler(Looper.getMainLooper())
 
-  private var altUrl = ""
-  private var triedAlt = false
   private var isLive = false
+  // Ausfallsicherheit: Adressen dieses Senders (HLS, TS), Wiederholversuche, Hänger-Erkennung
+  private var urls = listOf<String>()
+  private var urlIdx = 0
+  private var attempts = 0
+  private var authRetry = false
+  private var stallSince = 0L
+  private var retryTask: Runnable? = null
+  private lateinit var statusView: TextView
+  // Bildwiederholrate an die Sendung anpassen (50 Hz für Fernsehen, 24 Hz für Filme)
+  private var afrEnabled = true
+  private var origModeId = 0
+  private var modeChanged = false
+  private var fpsToken = -1
   // Doppelklick links/rechts: 10 Sekunden springen (wie bei Netflix)
   private lateinit var skipView: TextView
   private var skipDir = 0
@@ -127,7 +147,23 @@ class MainActivity : AppCompatActivity() {
     webView.addJavascriptInterface(Bridge(), "NativePlayer")
     root.addView(webView, matchParent())
 
-    player = ExoPlayer.Builder(this).setMediaSourceFactory(mediaSourceFactory())
+    // Puffer für flüssige Wiedergabe: schneller Start (1,5 s), danach bis 50 s vorladen; nach einem Hänger 3 s sammeln
+    val loadControl = DefaultLoadControl.Builder()
+      .setBufferDurationsMs(20_000, 50_000, 1_500, 3_000)
+      .setTargetBufferBytes(96 * 1024 * 1024)
+      .setPrioritizeTimeOverSizeThresholds(false)
+      .build()
+    // Beste Qualität von Anfang an: hohe Startschätzung der Bandbreite statt mit der kleinsten Stufe zu beginnen
+    val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(25_000_000L).build()
+    val selector = DefaultTrackSelector(this).apply {
+      setParameters(buildUponParameters()
+        .setViewportSizeToPhysicalDisplaySize(this@MainActivity, true)
+        .setExceedRendererCapabilitiesIfNecessary(true))
+    }
+    // Hardware-Decoder zuerst, bei Problemen automatisch auf einen anderen Decoder ausweichen
+    val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+    player = ExoPlayer.Builder(this, renderers).setMediaSourceFactory(mediaSourceFactory())
+      .setLoadControl(loadControl).setBandwidthMeter(meter).setTrackSelector(selector)
       .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build().also {
       it.addListener(playerListener)
       // Sauberer Ton-Fokus: bei Anrufen/anderem Ton automatisch pausieren.
@@ -174,6 +210,17 @@ class MainActivity : AppCompatActivity() {
     }
     overlay.addView(skipView, FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL or Gravity.START))
+    statusView = TextView(this).apply {
+      setTextColor(Color.WHITE); textSize = 18f
+      setPadding(dp(24), dp(12), dp(24), dp(12))
+      background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(0xCC000000.toInt()) }
+      visibility = View.GONE
+    }
+    overlay.addView(statusView, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+      bottomMargin = dp(90)
+    })
+    watchNetwork()
     // Touch-Geräte: Doppeltippen links/rechts
     val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
       override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -238,9 +285,163 @@ class MainActivity : AppCompatActivity() {
     val http = DefaultHttpDataSource.Factory()
       .setUserAgent(UA)
       .setAllowCrossProtocolRedirects(true)
-      .setConnectTimeoutMs(15000)
-      .setReadTimeoutMs(15000)
-    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
+      .setConnectTimeoutMs(8000)
+      .setReadTimeoutMs(10000)
+      .setKeepPostFor302Redirects(true)
+    // Kurze Aussetzer überbrückt der Player selbst (ohne Puffer zu verlieren): schnell und mehrfach neu versuchen
+    val retry = object : DefaultLoadErrorHandlingPolicy(2) {
+      override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        val e = info.exception
+        if (e is HttpDataSource.InvalidResponseCodeException && e.responseCode in listOf(401, 403, 404)) return C.TIME_UNSET
+        return minOf(info.errorCount * 300L, 800L)
+      }
+    }
+    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)).setLoadErrorHandlingPolicy(retry)
+  }
+
+  // ---------- Ausfallsicherheit ----------
+  private fun httpCode(e: PlaybackException?): Int {
+    var c: Throwable? = e?.cause
+    while (c != null) { if (c is HttpDataSource.InvalidResponseCodeException) return c.responseCode; c = c.cause }
+    return 0
+  }
+  private fun isOnline(): Boolean = try {
+    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val n = cm.activeNetwork
+    n != null && (cm.getNetworkCapabilities(n)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+  } catch (e: Exception) { true }
+
+  private fun showStatus(t: String?) {
+    if (t == null) statusView.visibility = View.GONE
+    else { statusView.text = t; statusView.visibility = View.VISIBLE }
+  }
+  private fun later(ms: Long, f: () -> Unit) {
+    retryTask?.let { main.removeCallbacks(it) }
+    val tok = playToken
+    val r = Runnable { retryTask = null; if (tok == playToken && overlay.visibility == View.VISIBLE) f() }
+    retryTask = r; main.postDelayed(r, ms)
+  }
+  // Stream frisch laden (nicht den alten Puffer wiederholen); Filme an derselben Stelle, Live am aktuellen Punkt
+  private fun reload(url: String? = null) {
+    val p = player ?: return
+    val u = url ?: urls.getOrNull(urlIdx) ?: return
+    val pos = p.currentPosition
+    if (isLive) p.setMediaItem(MediaItem.fromUri(u)) else p.setMediaItem(MediaItem.fromUri(u), pos)
+    p.prepare(); p.playWhenReady = true
+  }
+
+  // Verbindung weg, Anbieter-Fehler oder Hänger: erst schnell neu verbinden, dann andere Adresse (HLS/TS),
+  // dann (Live) automatisch eine andere Variante desselben Senders, die dasselbe zeigt.
+  private fun recover(err: PlaybackException?) {
+    if (player == null || overlay.visibility != View.VISIBLE) return
+    stallSince = 0
+    if (!isOnline()) {
+      showStatus("Keine Internetverbindung. Die Wiedergabe startet automatisch, sobald sie zurück ist.")
+      later(5000) { recover(err) }
+      return
+    }
+    val code = httpCode(err)
+    if ((code == 401 || code == 403) && !authRetry) {
+      // oft nur die alte Verbindung beim Anbieter noch offen: kurz warten, dann nochmal
+      authRetry = true
+      showStatus("Verbindung wird wiederhergestellt …")
+      later(2000) { reload() }
+      return
+    }
+    // Server antwortet, liefert aber nichts (5xx): schneller zur nächsten Adresse bzw. zum Ersatzsender
+    val maxTries = if (isLive) (if (code >= 500) 1 else 2) else 6
+    if (code != 401 && code != 403 && code != 404 && attempts < maxTries) {
+      attempts++
+      showStatus("Verbindung wird wiederhergestellt …")
+      later(longArrayOf(250, 1000, 2000, 3000, 4000, 5000)[attempts - 1]) { reload() }
+      return
+    }
+    if (isLive && urlIdx + 1 < urls.size) {
+      urlIdx++; attempts = 0
+      showStatus("Verbindung wird wiederhergestellt …")
+      later(200) { reload(urls[urlIdx]) }
+      return
+    }
+    val msg = if (err != null) friendlyError(err) else "Der Stream hat aufgehört zu senden."
+    if (isLive) {
+      showStatus("Sender gestört, suche gleichwertigen Ersatz …")
+      runJs("window.__player&&__player.failover?__player.failover(" + jsStr(msg) + "):(window.__player&&__player.error&&__player.error(" + jsStr(msg) + "))")
+    } else {
+      hidePlayer()
+      runJs("window.__player&&__player.error&&__player.error(" + jsStr(msg) + ")")
+    }
+  }
+
+  // Hänger erkennen: Live > 10 s am Puffern, Filme > 20 s -> neu verbinden
+  private val watchdog = object : Runnable {
+    override fun run() {
+      if (overlay.visibility != View.VISIBLE) return
+      val p = player
+      if (p != null && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING) {
+        val now = SystemClock.uptimeMillis()
+        if (stallSince == 0L) stallSince = now
+        else if (now - stallSince > (if (isLive) 10_000 else 20_000)) recover(null)
+      } else stallSince = 0
+      main.postDelayed(this, 1000)
+    }
+  }
+
+  // Internet wieder da: sofort weiter (nicht erst auf den nächsten Versuch warten)
+  private fun watchNetwork() {
+    try {
+      val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+      cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+          main.post {
+            val p = player ?: return@post
+            if (overlay.visibility == View.VISIBLE && (p.playerError != null || p.playbackState != Player.STATE_READY)) {
+              retryTask?.let { main.removeCallbacks(it) }; retryTask = null
+              attempts = 0; showStatus("Verbindung wird wiederhergestellt …"); reload()
+            }
+          }
+        }
+      })
+    } catch (e: Exception) {}
+  }
+
+  // ---------- Bildwiederholrate (ruckelfreie Bewegungen, z. B. Fußball mit 50 Bildern/s) ----------
+  private fun measureFps() {
+    val p = player ?: return
+    val tok = playToken
+    if (!afrEnabled || fpsToken == tok) return
+    fpsToken = tok
+    val f = p.videoFormat?.frameRate ?: -1f
+    if (f > 10f) { applyFps(f); return }
+    fun frames(): Long = p.videoDecoderCounters?.let {
+      it.ensureUpdated(); (it.renderedOutputBufferCount + it.skippedOutputBufferCount + it.droppedBufferCount).toLong() } ?: -1L
+    val c0 = frames(); val t0 = SystemClock.uptimeMillis()
+    main.postDelayed({
+      if (tok != playToken || overlay.visibility != View.VISIBLE || !p.isPlaying) { fpsToken = -1; return@postDelayed }
+      val c1 = frames()
+      if (c0 >= 0 && c1 > c0) applyFps((c1 - c0) * 1000f / (SystemClock.uptimeMillis() - t0))
+    }, 4000)
+  }
+  private fun applyFps(raw: Float) {
+    if (!afrEnabled || android.os.Build.VERSION.SDK_INT < 23) return
+    val std = floatArrayOf(23.976f, 24f, 25f, 29.97f, 30f, 50f, 59.94f, 60f)
+    val fps = std.minByOrNull { Math.abs(it - raw) } ?: return
+    if (Math.abs(fps - raw) > 1.5f) return
+    // gewünschte Rate: 24p als 24 Hz, 25/30p doppelt (50/60 Hz), 50/60p direkt
+    val want = if (fps < 24.5f || fps >= 49f) fps else fps * 2
+    @Suppress("DEPRECATION") val d = windowManager.defaultDisplay
+    val cur = d.mode
+    val m = d.supportedModes
+      .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+      .minByOrNull { Math.abs(it.refreshRate - want) } ?: return
+    if (Math.abs(m.refreshRate - want) > 0.1f || m.modeId == cur.modeId) return
+    if (!modeChanged) origModeId = cur.modeId
+    modeChanged = true
+    window.attributes = window.attributes.also { it.preferredDisplayModeId = m.modeId }
+  }
+  private fun restoreMode() {
+    if (!modeChanged) return
+    modeChanged = false
+    window.attributes = window.attributes.also { it.preferredDisplayModeId = origModeId }
   }
 
   private val playerListener = object : Player.Listener {
@@ -251,29 +452,30 @@ class MainActivity : AppCompatActivity() {
         p.seekToDefaultPosition(); p.prepare(); p.playWhenReady = true
         return
       }
-      if (altUrl.isNotEmpty() && !triedAlt) {
-        triedAlt = true
-        player?.let { p ->
-          p.setMediaItem(MediaItem.fromUri(altUrl)); p.prepare(); p.playWhenReady = true
-        }
-      } else {
-        hidePlayer()
-        runJs("window.__player&&__player.error&&__player.error(" + jsStr(friendlyError(error)) + ")")
-      }
+      // Format/Decoder-Fehler: anderer Weg (TS statt HLS) kann helfen, Wiederholen nicht
+      val decode = error.errorCode in 4000..4999 || error.errorCode in 3000..3999
+      if (decode && !(isLive && urlIdx + 1 < urls.size)) attempts = 99
+      recover(error)
     }
 
     // Erstes Bild laeuft: erst ab jetzt zaehlt die Sehzeit fuer "Deine Sender"
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-      if (isPlaying) runJs("window.__player&&__player.playing&&__player.playing()")
+      if (isPlaying) {
+        runJs("window.__player&&__player.playing&&__player.playing()")
+        showStatus(null)
+        measureFps()
+        // stabil gelaufen: Zähler für Wiederholversuche zurücksetzen
+        val tok = playToken
+        main.postDelayed({ if (tok == playToken && player?.isPlaying == true) { attempts = 0; authRetry = false } }, 15_000)
+      }
     }
 
     override fun onPlaybackStateChanged(state: Int) {
       if (state == Player.STATE_READY) startTimer()
       if (state == Player.STATE_ENDED) {
         if (isLive) {
-          // Live-Stream vom Anbieter beendet: zurueck zur Liste mit Hinweis.
-          hidePlayer()
-          runJs("window.__player&&__player.error&&__player.error(" + jsStr("Live-Stream beendet") + ")")
+          // Live-Stream bricht ab (Anbieter trennt die Verbindung): neu verbinden statt aufhören
+          recover(null)
         } else {
           val tok = playToken
           runJs("window.__player&&__player.ended&&__player.ended()")
@@ -353,6 +555,7 @@ class MainActivity : AppCompatActivity() {
     @JavascriptInterface fun play(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
       main.post { showPlayer(url, live, title, startSec, alt) }
     }
+    @JavascriptInterface fun afr(on: Boolean) { main.post { afrEnabled = on; if (!on) restoreMode() } }
     @JavascriptInterface fun stop() { main.post { hidePlayer() } }
     @JavascriptInterface fun subtitle(text: String) {
       main.post {
@@ -366,7 +569,11 @@ class MainActivity : AppCompatActivity() {
   private fun showPlayer(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
     val p = player ?: return
     playToken++
-    altUrl = alt; triedAlt = false; isLive = live
+    isLive = live
+    urls = listOf(url, alt).filter { it.isNotEmpty() }.distinct()
+    urlIdx = 0; attempts = 0; authRetry = false; stallSince = 0
+    retryTask?.let { main.removeCallbacks(it) }; retryTask = null
+    showStatus(null)
     titleView.text = title
     subtitleView.text = ""; subtitleView.visibility = View.GONE
     p.setMediaItem(MediaItem.fromUri(url))
@@ -379,6 +586,7 @@ class MainActivity : AppCompatActivity() {
     webView.isFocusableInTouchMode = false
     playerView.requestFocus()
     showInfo(6000)
+    main.removeCallbacks(watchdog); main.postDelayed(watchdog, 1000)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     startTimer()
   }
@@ -414,6 +622,9 @@ class MainActivity : AppCompatActivity() {
   private fun hidePlayer() {
     playToken++
     main.removeCallbacks(singleTap); main.removeCallbacks(endSkip); endSkip.run()
+    retryTask?.let { main.removeCallbacks(it) }; retryTask = null
+    main.removeCallbacks(watchdog); showStatus(null)
+    restoreMode(); fpsToken = -1
     val wasShown = overlay.visibility == View.VISIBLE
     player?.let { it.playWhenReady = false; it.stop(); it.clearMediaItems() }
     overlay.visibility = View.GONE
@@ -521,7 +732,8 @@ class MainActivity : AppCompatActivity() {
     super.onResume()
     runJs("window.__player&&__player.shown&&__player.shown()")
     val p = player
-    if (p != null && isLive && overlay.visibility == View.VISIBLE) { p.seekToDefaultPosition(); p.play() }
+    // Live nach der Rückkehr frisch verbinden (die alte Verbindung ist oft schon weg)
+    if (p != null && isLive && overlay.visibility == View.VISIBLE) reload()
   }
 
   override fun onDestroy() {

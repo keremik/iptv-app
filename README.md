@@ -145,5 +145,15 @@ an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit ältere
   für die genutzte App erlauben.
 - **Fernbedienung:** Pfeiltasten, OK, Zurück; im Player Sender hoch/runter, Kanal-Tasten; Zurück auf
   der Startseite legt die App in den Hintergrund.
+- **Abgestimmt auf den Xiaomi TV Stick 4K (Android TV 11, 2 GB):** volle Oberfläche, Hardware-Decoder für
+  4K/HEVC, Puffer für ruckelfreie Wiedergabe (schneller Start nach 1,5 s, bis 50 s Vorlauf), beste
+  Qualitätsstufe von Anfang an und die beste Fassung eines Films (z. B. 4K statt HD in derselben Sprache).
+- **Bildwiederholrate:** Der Fernseher wird auf die Bildrate der Sendung umgestellt (50 Hz für Fußball und
+  deutsches TV, 24 Hz für Filme). Abschaltbar unter Einstellungen → Bildwiederholrate.
+- **Ausfallsicherheit:** Bricht ein Stream ab, verbindet der Player sofort neu (mehrere schnelle Versuche,
+  erst HLS, dann TS). Klappt das nicht, wechselt er automatisch auf eine andere Variante desselben Senders
+  (z. B. FHD → HD → Ersatz), beim Spiel des Lieblingsvereins auch auf einen anderen Sender mit dem Spiel.
+  Fällt das Internet aus, geht die Wiedergabe von selbst weiter, sobald es zurück ist. Filme setzen an der
+  gleichen Stelle fort.
 - **Spulen wie bei Netflix:** Bei Filmen und Serien zweimal schnell rechts/links drücken springt 10 Sekunden
   vor/zurück, jeder weitere Druck nochmal 10 Sekunden. Einmal drücken zeigt die Steuerung.
