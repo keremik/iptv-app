@@ -12,7 +12,7 @@
   #clock { font-size:26px; color:#ddd; flex:1; }
   .icon { background:none; border:0; color:#fff; font-size:30px; cursor:pointer; padding:6px 12px; border-radius:8px; }
   .icon:focus, .tile:focus, .btn:focus { outline:4px solid #fff; }
-  #status { padding:0 30px; font-size:16px; color:#9aa; min-height:22px; }
+  #status { padding:0 30px; font-size:16px; color:#9aa; min-height:22px; white-space:pre-wrap; word-break:break-word; }
   section { flex:1; min-height:0; display:flex; flex-direction:column; }
   section[hidden] { display:none; }
 
@@ -245,7 +245,11 @@ function play(it) {
     // Live-Sender als .ts-Stream
     tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: it.url });
     tsPlayer.attachMediaElement(v);
-    tsPlayer.on(mpegts.Events.ERROR, (t, d) => setStatus('Stream-Fehler: ' + it.name + ' (' + t + ')'));
+    tsPlayer.on(mpegts.Events.ERROR, (type, detail, data) => {
+      const extra = data && (data.code || data.msg) ? `, ${data.code ?? ''} ${data.msg ?? ''}`.trimEnd() : '';
+      setStatus(`Stream-Fehler: ${it.name} (${type}/${detail}${extra})\nPrüfe Verbindung ...`);
+      diagnose(it, `${type}/${detail}${extra}`);
+    });
     tsPlayer.load();
     tsPlayer.play();
   } else if (it.url.includes('.m3u8') && window.Hls && Hls.isSupported()) {
@@ -253,13 +257,31 @@ function play(it) {
     hls.loadSource(it.url);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
-    hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) setStatus('Stream-Fehler: ' + it.name + ' (' + d.details + ')'); });
+    hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) { setStatus('Stream-Fehler: ' + it.name + ' (' + d.details + ')'); diagnose(it, d.details); } });
   } else {
     v.src = it.url;
     v.play().catch(() => {});
   }
   setStatus('Spiele: ' + it.name);
   renderLists();
+}
+
+// Fragt den Proxy, was beim Anbieter wirklich passiert, und zeigt es in der Statuszeile
+let diagRunning = false;
+async function diagnose(it, why) {
+  if (diagRunning) return;
+  diagRunning = true;
+  try {
+    if (!cfg.proxy) return setStatus(`Stream-Fehler: ${it.name} (${why})\nKein Proxy eingetragen.`);
+    const r = await fetch(it.url + '&debug=1');
+    const t = await r.text();
+    setStatus(`Stream-Fehler: ${it.name} (${why})\n` +
+      (r.ok ? t : `Proxy antwortet HTTP ${r.status}: ${t.slice(0, 300)}`));
+  } catch (e) {
+    setStatus(`Stream-Fehler: ${it.name} (${why})\nProxy nicht erreichbar oder veraltet: ${e.message}`);
+  } finally {
+    diagRunning = false;
+  }
 }
 
 function renderLists() {
