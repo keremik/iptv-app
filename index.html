@@ -779,7 +779,9 @@ function stopPlayback() {
   video.load();
 }
 
-// VLC (kostenlose App) verbindet sich direkt mit dem Anbieter und spielt auch mkv/avi
+// VLC (kostenlose App) spielt auch mkv/avi. Es holt den Stream über den Proxy,
+// weil der Anbieter VLC bei direkter Verbindung nicht beliefert hat.
+const abs = u => new URL(u, location.href).href;
 const vlcActions = direct => [
   { label: 'In VLC öffnen', href: 'vlc-x-callback://x-callback-url/stream?url=' + enc(direct) },
   { label: 'VLC installieren (kostenlos)', href: 'https://apps.apple.com/app/id650377962' },
@@ -839,7 +841,7 @@ function playLive(it, list) {
   openPlayer(it.name, '');
   $('#pPrev').hidden = $('#pNext').hidden = list.length < 2;
   const raw = ext => `${base()}/live/${cred()}/${it.id}.${ext}`;
-  startStream({ ts: px(raw('ts')), m3u8: px(raw('m3u8')), direct: raw('ts') }, true, it.name);
+  startStream({ ts: px(raw('ts')), m3u8: px(raw('m3u8')), direct: abs(px(raw('ts'))) }, true, it.name);
   loadEpg(it);
 }
 
@@ -867,12 +869,12 @@ function playVod(e, at) {
   if (isIOS && /^(mkv|avi|wmv|flv)$/i.test(e.ext || '')) {
     return toast(`„${e.name}“ liegt im Format .${e.ext} vor. Das kann kein iPhone-Browser abspielen.\n` +
       'Mit der kostenlosen App VLC läuft der Film. Zeigt „In VLC öffnen“ einen Fehler, ist VLC noch nicht installiert.',
-      true, vlcActions(vodRaw(e)));
+      true, vlcActions(abs(px(vodRaw(e)))));
   }
   nowPlaying = { live: false, e, seek: at > 5 ? at : 0 };
   openPlayer(e.name, e.sub);
   $('#pPrev').hidden = $('#pNext').hidden = true;
-  startStream({ url: px(vodRaw(e)), direct: vodRaw(e) }, false, e.name);
+  startStream({ url: px(vodRaw(e)), direct: abs(px(vodRaw(e))) }, false, e.name);
   video.onended = () => {
     const r = resumes(); delete r[e.key]; store.set('resume', r);
     if (e.kind === 'ep') nextEpisode(e);
