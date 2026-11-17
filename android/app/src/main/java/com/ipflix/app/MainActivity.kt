@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity() {
     playerView = PlayerView(this).apply {
       player = this@MainActivity.player
       useController = true
-      controllerShowTimeoutMs = 3500
+      controllerShowTimeoutMs = 5000
       resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
       setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
       setBackgroundColor(Color.BLACK)
@@ -580,6 +580,8 @@ class MainActivity : AppCompatActivity() {
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     showStatus(null)
     titleView.text = title
+    // Zeitbalken mit der Fernbedienung: links/rechts verschiebt um 10 s
+    playerView.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setKeyTimeIncrement(10_000)
     main.removeCallbacks(restoreLater)
     subtitleView.text = ""; subtitleView.visibility = View.GONE
     p.setMediaItem(MediaItem.fromUri(url))
@@ -628,6 +630,8 @@ class MainActivity : AppCompatActivity() {
     }
     skipView.visibility = View.VISIBLE
     playerView.showController()       // Fortschrittsbalken mit Zeit sichtbar, wie bei Netflix
+    // Die Leiste setzt die Auswahl sonst auf Pause: beim Spulen bleiben, damit weiteres links/rechts weiterspult
+    playerView.post { if (skipActive) playerView.requestFocus() }
     main.removeCallbacks(endSkip); main.postDelayed(endSkip, 1300)
   }
 
@@ -696,7 +700,9 @@ class MainActivity : AppCompatActivity() {
           KeyEvent.KEYCODE_MEDIA_PREVIOUS -> if (isLive) { runJs("window.__player&&__player.switch&&__player.switch(-1)"); return true }
         }
       }
-      if (inButtons) { playerView.dispatchKeyEvent(event); return true }
+      // In den Knöpfen: Android selbst die Auswahl bewegen lassen (links/rechts/hoch/runter zwischen Knöpfen,
+      // Zeitbalken und Zahnrad). Vorher wurde jede Taste hier "verschluckt", dadurch blieb die Auswahl hängen.
+      if (inButtons) return super.dispatchKeyEvent(event)
       val isOk = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER ||
                  k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_SPACE
       when (k) {

@@ -156,5 +156,6 @@ an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit ältere
   Fällt das Internet aus, geht die Wiedergabe von selbst weiter, sobald es zurück ist. Filme setzen an der
   gleichen Stelle fort.
 - **Player-Bedienung (Filme/Serien):** rechts/links = 10 Sekunden vor/zurück (gedrückt halten spult schneller),
-  OK = Pause/Weiter, hoch = Leiste zeigen, runter = in die Knöpfe (Zeitbalken, Zahnrad für Tonspur/Untertitel),
+  OK = Pause/Weiter, hoch = Leiste zeigen, runter = in die Knöpfe; dort mit allen Pfeiltasten zwischen Knöpfen,
+  Zeitbalken (links/rechts = 10 s schieben) und Zahnrad (Tonspur/Untertitel) wechseln,
   Zurück = Knöpfe verlassen bzw. Player schließen. Live: hoch/runter wechselt den Sender, OK zeigt die Leiste.
