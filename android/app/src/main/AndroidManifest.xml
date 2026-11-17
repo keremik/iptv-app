@@ -16,6 +16,7 @@
       android:hardwareAccelerated="true">
     <activity
         android:name=".MainActivity"
+        android:banner="@drawable/banner"
         android:exported="true"
         android:screenOrientation="landscape"
         android:launchMode="singleTask"
