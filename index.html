@@ -128,21 +128,10 @@
   .more-card.chan { display: flex; align-items: center; justify-content: center; color: var(--link); font-size: 14px; }
   .chan .cnote { margin-top: 3px; font-size: 12px; font-weight: 700; line-height: 1.25; color: var(--accent); }
 
-  /* Nächstes Spiel des Lieblingsvereins */
-  .match { margin: 0 var(--pad) 2.6vw; padding: 20px 0 6px; border-radius: 12px; border: 1px solid rgba(255,255,255,.1);
-           background: linear-gradient(100deg, rgba(227,38,54,.22), rgba(255,255,255,.04) 55%, rgba(253,185,19,.10)); }
-  .mhead { display: flex; align-items: center; flex-wrap: wrap; padding: 0 24px; }
-  .mbadge { width: 64px; height: 64px; object-fit: contain; flex: none; margin-right: 18px; }
-  .mtxt { margin-right: 18px; min-width: 0; }
-  .mleague { font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
-  .match h2 { margin: 2px 0 4px; font-size: 26px; font-size: clamp(20px, 2.2vw, 30px); line-height: 1.15; }
-  .mmeta { color: #ddd; font-size: 15px; }
-  .mpill { margin-left: auto; padding: 6px 14px; border-radius: 999px; background: rgba(255,255,255,.14); font-weight: 700; font-size: 14px; white-space: nowrap; }
-  .mpill.live { background: var(--accent); }
-  .mlater { padding: 12px 24px 0; color: var(--muted); font-size: 13px; }
-  .mnote { margin: 2px 24px 0; color: var(--muted); font-size: 13px; line-height: 1.45; max-width: 900px; }
-  .match h3 { margin: 16px 24px 0; font-size: 15px; color: #e5e5e5; }
-  .match .slider { padding: 6px 16px 10px; scroll-padding: 0 16px; }
+  /* Nächstes Spiel des Lieblingsvereins: normale Reihe mit einer Infozeile */
+  .match h2 { flex-wrap: wrap; gap: 2px 14px; }
+  .match .mmeta { font-size: 14px; font-weight: 400; color: var(--muted); }
+  .match .mlive { align-self: center; padding: 1px 7px; border-radius: 3px; background: var(--accent); color: #fff; font-size: 12px; letter-spacing: .5px; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
           grid-template-columns: repeat(auto-fill, minmax(clamp(112px, 13.5vw, 210px), 1fr));
@@ -245,12 +234,6 @@
     .ep .n { display: none; }
     .ep .thumb { width: 110px; }
     .login-card { padding: 32px 22px; }
-    .match { margin-left: 16px; margin-right: 16px; }
-    .mhead { padding: 0 14px; }
-    .mbadge { width: 44px; height: 44px; margin-right: 10px; }
-    .mpill { margin: 10px 0 0; }
-    .mlater, .match h3, .mnote { padding-left: 0; margin-left: 14px; margin-right: 14px; }
-    .match .slider { padding: 6px 6px 10px; }
   }
 
   /* ---- Ältere Browser (z. B. Fernseher mit Chrome 77): Ersatz für neuere CSS-Funktionen ---- */
@@ -276,6 +259,7 @@
   .no-gap .meta > * { margin-right: 12px; }
   .no-gap .actions > * { margin-right: 10px; }
   .no-gap .row h2 button { margin-left: 14px; }
+  .no-gap .match h2 > * + * { margin-left: 14px; }
   .no-gap .slider > * + * { margin-left: var(--gap); }
   .no-gap .ep > * + * { margin-left: 16px; }
   .no-gap .ep .t b span + span { margin-left: 10px; }
@@ -808,14 +792,6 @@ async function loadFixtures() {
 }
 
 const dayKey = t => new Date(t).toDateString();
-function whenLabel(m) {
-  const now = Date.now(), min = Math.round((m.ts - now) / 60e3);
-  if (now >= m.ts) return now <= m.ts + MATCH_LEN ? 'Läuft jetzt' : 'Beendet';
-  if (min <= 90) return `Beginnt in ${min} Min.`;
-  if (dayKey(m.ts) === dayKey(now)) return 'Heute';
-  if (dayKey(m.ts) === dayKey(now + 864e5)) return 'Morgen';
-  return `in ${Math.round((new Date(m.ts).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 864e5)} Tagen`;
-}
 const fmtDay = t => new Date(t).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtClock = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 const leagueName = n => LEAGUE_NAMES[n] || n || '';
@@ -889,49 +865,24 @@ async function matchChannels(m, live, all) {
   return { info, best, others, note, epg: hits.length > 0 };
 }
 
-// Kasten auf der Startseite und bei Live TV; füllt sich, sobald der Spielplan da ist
+// Schlanke Reihe auf der Startseite und bei Live TV: nächstes Spiel in einer Zeile, darunter die Sender
 function matchBox(live, all) {
   const box = el('div');
   if (!team) return box;
   loadFixtures().then(list => {
     const m = list[0];
     if (!m) return;
-    const sec = el('section', 'match'), head = el('div', 'mhead'), txt = el('div', 'mtxt');
-    const badge = src => { const i = new Image(); i.className = 'mbadge'; i.alt = ''; i.referrerPolicy = 'no-referrer'; i.onerror = () => i.remove(); i.src = src; return i; };
-    const pill = el('span', 'mpill' + (Date.now() >= m.ts ? ' live' : ''), whenLabel(m));
-    txt.append(el('div', 'mleague', leagueName(m.league)), el('h2', null, `${m.home} – ${m.away}`),
-      el('div', 'mmeta', `${fmtDay(m.ts)} · ${fmtClock(m.ts)} Uhr${m.venue ? ' · ' + m.venue : ''}`));
-    if (m.hb) head.append(badge(m.hb));
-    head.append(txt);
-    if (m.ab) head.append(badge(m.ab));
-    head.append(pill);
-    sec.append(head);
-    const later = list.slice(1, 3).map(x => `${fmtDay(x.ts)} ${fmtClock(x.ts)} ${x.isHome ? 'gegen ' + x.away : 'bei ' + x.home} (${leagueName(x.league)})`);
-    if (later.length) sec.append(el('div', 'mlater', 'Danach: ' + later.join('  ·  ')));
-    const body = el('div');
-    body.append(el('h3', null, 'Suche passende Sender ...'));
-    sec.append(body);
-    box.append(sec);
     matchChannels(m, live, all || live).then(res => {
-      if (!sec.isConnected) return;
-      setKids(body);
-      const group = (title, items) => {
-        const slider = el('div', 'slider');
-        items.forEach(it => slider.append(card(it, { note: res.note(it) }, items)));
-        body.append(el('h3', null, title), slider);
-      };
-      const info = res.info, names = info ? arr(info.channels).join(', ') : '';
-      if (res.best.length) {
-        const sure = res.epg || (info && info.status === 'bestätigt');
-        group(names ? `${sure ? 'Hier läuft das Spiel' : 'Voraussichtlich'}: ${names}` : 'Hier läuft das Spiel', res.best);
-      } else if (names) {
-        body.append(el('h3', null, `Laut Recherche: ${names}`), el('div', 'mnote', 'Diesen Sender habe ich bei deinem Anbieter nicht gefunden.'));
-      }
-      if (info && info.note) {
-        body.append(el('div', 'mnote', info.note));
-      }
-      if (res.others.length) group(res.best.length ? 'Weitere Sportsender' : 'Passende Sender', res.others);
-      if (!res.best.length && !res.others.length && !names) body.append(el('h3', null, 'Kein passender Sender gefunden. Nutze die Suche oben.'));
+      const items = res.best.concat(res.others).slice(0, 24);
+      const now = Date.now(), day = dayKey(m.ts) === dayKey(now) ? 'Heute' : dayKey(m.ts) === dayKey(now + 864e5) ? 'Morgen' : fmtDay(m.ts);
+      const meta = [leagueName(m.league), `${day}, ${fmtClock(m.ts)} Uhr`, m.venue].filter(Boolean).join(' · ');
+      const row = items.length ? buildRow({ title: '', items, cardOpts: it => ({ note: quality(it.raw).label }) }) : el('section', 'row');
+      const h = row.querySelector('h2') || row.appendChild(el('h2'));
+      setKids(h);
+      if (now >= m.ts && now <= m.ts + MATCH_LEN) h.append(el('span', 'mlive', 'LIVE'));
+      h.append(el('span', null, `${m.home} – ${m.away}`), el('span', 'mmeta', meta));
+      row.classList.add('match');
+      setKids(box, row);
     });
   });
   return box;
