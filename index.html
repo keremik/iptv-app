@@ -103,6 +103,9 @@
   .card .bar { position: absolute; left: 9px; right: 9px; bottom: 4px; height: 3px; background: rgba(255,255,255,.3); }
   .card .bar i { display: block; height: 100%; background: var(--accent); }
   .card.has-bar .label { padding-bottom: 12px; }
+  .card.removing { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .card.removing img { opacity: .55; }
+  .card.removing .label { color: #ff6b74; }
   .more-card { display: flex; align-items: center; justify-content: center; color: var(--muted); font-weight: 700; background: #1f1f1f; }
   @media (hover: hover) { .card:hover { transform: scale(1.08); z-index: 3; box-shadow: 0 10px 24px rgba(0,0,0,.75); } }
   .card:focus-visible { transform: scale(1.08); z-index: 3; outline: 3px solid #fff; outline-offset: 0; }
@@ -553,9 +556,9 @@ function norm(k, x) {
   const raw = x.name || '';
   if (k === 'live') return { kind: 'live', id: x.stream_id, name: chanName(raw), raw, img: x.stream_icon, cat: x.category_id, num: +x.num || 0 };
   const p = pretty(raw);
-  if (k === 'movie') return { kind: 'movie', id: x.stream_id, name: p.title, raw, img: x.stream_icon, cat: x.category_id,
+  if (k === 'movie') return { kind: 'movie', id: x.stream_id, name: p.title, raw, img: x.stream_icon, cat: x.category_id, tmdb: x.tmdb || x.tmdb_id || '',
     ext: x.container_extension || 'mp4', rating: x.rating, added: +x.added || 0, year: year(x.year || x.releasedate) || p.year };
-  return { kind: 'series', id: x.series_id, name: p.title, raw, img: x.cover, cat: x.category_id, plot: x.plot, genre: x.genre,
+  return { kind: 'series', id: x.series_id, name: p.title, raw, img: x.cover, cat: x.category_id, tmdb: x.tmdb || x.tmdb_id || '', plot: x.plot, genre: x.genre,
     rating: x.rating, year: year(x.releaseDate || x.release_date) || p.year, backdrop: first(x.backdrop_path), added: +x.last_modified || 0 };
 }
 const getCats = k => once('c' + k, () => api(CAT[k][0]).then(arr));
@@ -698,11 +701,12 @@ function groupVariants(items) {
 
 async function grouped(k) {
   const [cats, all] = await Promise.all([getCats(k).catch(() => []), getItems(k)]);
-  if (k === 'live' && all.length && !all[0].lang) {
-    // Sprache je Sender, für die Suche nach dem passenden offiziellen Logo
+  if (all.length && all[0].lang === undefined) {
+    // Sprache je Eintrag: "(TR-) Film" zählt vor der Kategorie. Sender brauchen sie für das Logo,
+    // Filme und Serien für die Vorschläge (nur gewählte Sprachen, eine Fassung je Film).
     const catLang = {};
     cats.forEach(c => { catLang[String(c.category_id)] = langOf(c.category_name); });
-    for (const it of all) it.lang = catLang[String(it.cat)] || itemLang(it.raw) || langs[0] || 'de';
+    for (const it of all) it.lang = itemLang(it.raw) || catLang[String(it.cat)] || (k === 'live' ? (langs[0] || 'de') : '');
   }
   let items = all;
   if (langs.length) {
@@ -856,6 +860,27 @@ function becauseRow(kind, items) {
   const fresh = notSeen(kind);
   const list = byAppeal(items.filter(it => String(it.cat) === String(l.cat) && String(it.id) !== String(l.id) && fresh(it))).slice(0, 40);
   return list.length >= 4 ? { title: `Weil du „${pretty(l.name).title}“ gesehen hast`, items: list } : null;
+}
+// Für Vorschläge (Titelbild, Empfohlen, Weil du ..., Neu bei ...): nur Inhalte in den gewählten Sprachen;
+// gibt es einen Film in mehreren Sprachen, nur die bevorzugte Fassung (Reihenfolge: Deutsch, Türkisch, ...).
+// Die Kategorien bleiben davon unberührt.
+const langRank = k => { const i = LANG_KEYS.indexOf(k); return i < 0 ? 99 : i; };
+const workKey = it => it.tmdb ? 't' + it.tmdb : fold(it.name).replace(/[^a-z0-9]/g, '') + '|' + (it.year || '');
+const suggMemo = { src: null, langs: '', out: null };
+function sugg(items) {
+  if (!langs.length) return items;
+  const lk = langs.join();
+  if (suggMemo.src === items && suggMemo.langs === lk) return suggMemo.out;
+  const best = new Map();
+  for (const it of items) {
+    if (langs.indexOf(it.lang) < 0) continue;
+    const k = workKey(it), cur = best.get(k);
+    if (!cur || langRank(it.lang) < langRank(cur.lang)) best.set(k, it);
+  }
+  const keep = new Set(best.values());
+  const out = items.filter(it => keep.has(it));
+  suggMemo.src = items; suggMemo.langs = lk; suggMemo.out = out;
+  return out;
 }
 function mix(a, b) {
   const out = [];
@@ -1109,25 +1134,26 @@ const VIEWS = {
     const res = await settle(['movie', 'series', 'live'].map(grouped));
     if (res.every(r => r.status === 'rejected')) throw res[0].reason;
     const [M, S, L] = res.map(r => r.status === 'fulfilled' ? r.value : { items: [], groups: [], all: [] });
-    const recM = recommend('movie', M.items, 30), recS = recommend('series', S.items, 30);
+    const sM = sugg(M.items), sS = sugg(S.items);
+    const recM = recommend('movie', sM, 30), recS = recommend('series', sS, 30);
     const lastM = prefs.last.movie, lastS = prefs.last.series;
     const because = lastS && (!lastM || lastS.ts > lastM.ts)
-      ? becauseRow('series', S.items) || becauseRow('movie', M.items)
-      : becauseRow('movie', M.items) || becauseRow('series', S.items);
+      ? becauseRow('series', sS) || becauseRow('movie', sM)
+      : becauseRow('movie', sM) || becauseRow('series', sS);
     const rows = [resumeRow(),
       { title: 'Zuletzt gesehene Sender', items: recentChannels(L.all, 12) },
       { title: 'Deine Sender', items: topChannels(L.all, 14) },
       { title: 'Empfohlen für dich', items: mix(recM, recS).slice(0, 40) },
       favRow(), because,
-      { title: 'Neu bei Filmen', items: newest(M.items).slice(0, 60) },
-      { title: 'Neue Serien', items: newest(S.items).slice(0, 60) }];
+      { title: 'Neu bei Filmen', items: newest(sM).slice(0, 60) },
+      { title: 'Neue Serien', items: newest(sS).slice(0, 60) }];
     if (L.groups[0]) rows.push({ title: rowTitle('Live TV', L.groups[0].title), items: L.groups[0].items });
     for (let i = 0; i < 6; i++) {
       if (M.groups[i]) rows.push({ title: rowTitle('Filme', M.groups[i].title), items: M.groups[i].items });
       if (S.groups[i]) rows.push({ title: rowTitle('Serien', S.groups[i].title), items: S.groups[i].items });
       if (L.groups[i + 1] && i < 3) rows.push({ title: rowTitle('Live TV', L.groups[i + 1].title), items: L.groups[i + 1].items });
     }
-    return { hero: hero(pickHero(recM) || pickHero(M.items) || pickHero(S.items)), top: [matchBox(L.items, L.all)], rows };
+    return { hero: hero(pickHero(recM) || pickHero(sM) || pickHero(sS)), top: [matchBox(L.items, L.all)], rows };
   },
   async live() {
     const L = await grouped('live');
@@ -1135,14 +1161,14 @@ const VIEWS = {
              rows: [{ title: 'Zuletzt gesehen', items: recentChannels(L.all, 12) }, { title: 'Deine Sender', items: topChannels(L.all, 14) }, ...L.groups] };
   },
   async movie() {
-    const M = await grouped('movie'), rec = recommend('movie', M.items, 40);
-    return { hero: hero(pickHero(rec) || pickHero(M.items)), rows: [{ title: 'Empfohlen für dich', items: rec }, becauseRow('movie', M.items),
-             { title: 'Neu hinzugefügt', items: newest(M.items).slice(0, 60) }, ...M.groups] };
+    const M = await grouped('movie'), sM = sugg(M.items), rec = recommend('movie', sM, 40);
+    return { hero: hero(pickHero(rec) || pickHero(sM)), rows: [{ title: 'Empfohlen für dich', items: rec }, becauseRow('movie', sM),
+             { title: 'Neu hinzugefügt', items: newest(sM).slice(0, 60) }, ...M.groups] };
   },
   async series() {
-    const S = await grouped('series'), rec = recommend('series', S.items, 40);
-    return { hero: hero(pickHero(rec) || pickHero(S.items)), rows: [{ title: 'Empfohlen für dich', items: rec }, becauseRow('series', S.items),
-             { title: 'Neu hinzugefügt', items: newest(S.items).slice(0, 60) }, ...S.groups] };
+    const S = await grouped('series'), sS = sugg(S.items), rec = recommend('series', sS, 40);
+    return { hero: hero(pickHero(rec) || pickHero(sS)), rows: [{ title: 'Empfohlen für dich', items: rec }, becauseRow('series', sS),
+             { title: 'Neu hinzugefügt', items: newest(sS).slice(0, 60) }, ...S.groups] };
   },
   async mylist() {
     const r = resumeRow();
@@ -1162,14 +1188,49 @@ const VIEWS = {
   },
 };
 
+// Filme erscheinen erst ab 20 Minuten Sehzeit (die Position wird trotzdem gemerkt)
+const MOVIE_MIN = 20 * 60;
+let resumeEdit = false;
+function removeResume(e) {
+  const r = resumes();
+  Object.keys(r).forEach(k => {
+    const x = r[k];
+    if (x.key === e.key || (e.kind === 'ep' && x.kind === 'ep' && String(x.seriesId) === String(e.seriesId))) delete r[k];
+  });
+  store.set('resume', r);
+}
 function resumeRow() {
-  const list = Object.values(resumes()).sort((a, b) => b.ts - a.ts).slice(0, 30);
-  if (!list.length) return null;
+  const all = Object.values(resumes()).filter(e => e.kind !== 'movie' || e.t >= MOVIE_MIN).sort((a, b) => b.ts - a.ts);
+  const series = {}, list = [];
+  all.forEach(e => {                                   // je Serie nur die zuletzt geschaute Folge
+    if (e.kind === 'ep') { if (series[e.seriesId]) return; series[e.seriesId] = 1; }
+    if (list.length < 30) list.push(e);
+  });
+  if (!list.length) { resumeEdit = false; return null; }
   return {
     id: 'row-resume', title: 'Weiterschauen',
+    action: { label: resumeEdit ? 'Fertig' : 'Bearbeiten', onClick: () => { resumeEdit = !resumeEdit; refreshResumeRow(); focusResume(0, true); } },
     items: list.map(e => ({ kind: 'resume', name: pretty(e.name).title, img: e.img, e })),
-    cardOpts: it => ({ label: it.e.sub || it.name, progress: it.e.t / it.e.d, onClick: () => playVod(it.e, it.e.t) }),
+    cardOpts: it => ({
+      label: resumeEdit ? '× Entfernen' : (it.e.sub || it.name), progress: it.e.t / it.e.d, removing: resumeEdit,
+      onClick: () => {
+        if (!resumeEdit) return playVod(it.e, it.e.t);
+        const idx = list.indexOf(it.e);
+        removeResume(it.e);
+        toast('Aus „Weiterschauen“ entfernt');
+        refreshResumeRow();
+        focusResume(idx, false);
+      },
+    }),
   };
+}
+// Fokus nach dem Bearbeiten wieder in die Reihe setzen (Fernbedienung)
+function focusResume(idx, onAction) {
+  const row = $('#row-resume');
+  if (!row) { const f = document.querySelector('#rows .row .card, #rows .card'); if (f) f.focus(); return; }
+  const cards = row.querySelectorAll('.slider .card');
+  const t = onAction ? row.querySelector('h2 button') : cards[Math.min(idx, cards.length - 1)];
+  if (t) { t.focus({ preventScroll: true }); t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
 }
 function favRow() {
   const f = favs().map(x => Object.assign({}, x, { name: pretty(x.name).title }));
@@ -1273,6 +1334,7 @@ function card(it, o = {}, ctx) {
   const fb = el('div', 'fallback', it.name);
   if (it.img) { const im = lazyImg(it.img, () => im.replaceWith(fb)); c.append(im); } else c.append(fb);
   if (o.label) c.append(el('div', 'label', o.label));
+  if (o.removing) c.classList.add('removing');
   if (o.progress > 0) {
     const b = el('div', 'bar'), i = el('i');
     i.style.width = Math.min(100, o.progress * 100) + '%';
@@ -1287,6 +1349,7 @@ function buildRow(d) {
   const h = el('h2', null, d.title);
   const more = d.items.length > ROW_MAX;
   const showAll = () => go('grid', { title: d.title, items: d.items });
+  if (d.action) h.append(button(null, d.action.label, d.action.onClick));
   if (more) h.append(button(null, 'Alle anzeigen ›', showAll));
   const s = el('div', 'slider');
   for (const it of d.items.slice(0, ROW_MAX)) s.append(card(it, d.cardOpts && d.cardOpts(it), d.items));
