@@ -92,6 +92,8 @@
   <input id="usr">
   <label for="pw">Passwort</label>
   <input id="pw" type="password">
+  <label for="prx">Proxy-Adresse (vom Cloudflare Worker)</label>
+  <input id="prx" placeholder="https://iptv-proxy.DEIN-NAME.workers.dev">
   <button class="btn" id="save">Anmelden und speichern</button>
 </section>
 
@@ -126,13 +128,15 @@ let cache = {};
 let hls = null;
 
 const base = () => cfg.server.replace(/\/$/, '');
+// Alle Anfragen gehen über den Proxy, damit der Browser keine http-Verbindung blockiert
+const px = url => cfg.proxy ? `${cfg.proxy.replace(/\/$/, '')}/?u=${enc(url)}` : url;
 const fmtDate = ts => ts ? new Date(Number(ts) * 1000).toLocaleDateString('de-DE') : '–';
 const setStatus = t => { $('status').textContent = t; };
 
 function api(action, extra = '') {
   const url = `${base()}/player_api.php?username=${enc(cfg.user)}&password=${enc(cfg.pass)}` +
               (action ? `&action=${action}` : '') + extra;
-  return fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+  return fetch(px(url)).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 }
 
 function show(id) {
@@ -153,11 +157,12 @@ function showLogin() {
   $('srv').value = cfg?.server || '';
   $('usr').value = cfg?.user || '';
   $('pw').value = cfg?.pass || '';
+  $('prx').value = cfg?.proxy || '';
   $('srv').focus();
 }
 
 async function login() {
-  const c = { server: $('srv').value.trim(), user: $('usr').value.trim(), pass: $('pw').value };
+  const c = { server: $('srv').value.trim(), user: $('usr').value.trim(), pass: $('pw').value, proxy: $('prx').value.trim() };
   if (!c.server || !c.user || !c.pass) return setStatus('Bitte alle Felder ausfüllen.');
   cfg = c;
   try {
@@ -204,8 +209,8 @@ async function loadItems() {
 }
 
 function toItem(x) {
-  if (kind === 'live')  return { name: x.name, url: `${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.m3u8` };
-  if (kind === 'movie') return { name: x.name, url: `${base()}/movie/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.${x.container_extension || 'mp4'}` };
+  if (kind === 'live')  return { name: x.name, url: px(`${base()}/live/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.m3u8`) };
+  if (kind === 'movie') return { name: x.name, url: px(`${base()}/movie/${enc(cfg.user)}/${enc(cfg.pass)}/${x.stream_id}.${x.container_extension || 'mp4'}`) };
   return { name: x.name, seriesId: x.series_id };
 }
 
@@ -218,7 +223,7 @@ async function openSeries(it) {
       for (const ep of d.episodes[season]) {
         eps.push({
           name: `S${season} E${ep.episode_num} ${ep.title || ''}`.trim(),
-          url: `${base()}/series/${enc(cfg.user)}/${enc(cfg.pass)}/${ep.id}.${ep.container_extension || 'mp4'}`,
+          url: px(`${base()}/series/${enc(cfg.user)}/${enc(cfg.pass)}/${ep.id}.${ep.container_extension || 'mp4'}`),
         });
       }
     }
