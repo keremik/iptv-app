@@ -160,6 +160,7 @@
            padding: 12px 44px 12px 16px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
            box-shadow: 0 8px 28px #000; border-radius: 4px; }
   #toast button { position: absolute; top: 6px; right: 6px; }
+  #toast a { display: flex; width: max-content; max-width: 100%; margin-top: 10px; padding: 8px 16px; font-size: 15px; text-decoration: none; white-space: normal; }
 
   /* Anmeldung */
   #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 96px 16px 40px;
@@ -222,6 +223,7 @@
 <div id="menu" hidden>
   <div class="info" id="menuInfo"></div>
   <button id="mSettings">Zugangsdaten ändern</button>
+  <button id="mLang"></button>
   <button id="mRefresh">Listen neu laden</button>
   <button id="mLogout">Abmelden</button>
 </div>
@@ -251,7 +253,7 @@
   </div>
 </div>
 
-<div id="toast" role="status" hidden><span id="toastText"></span><button class="iconbtn" id="toastClose" aria-label="Schließen">✕</button></div>
+<div id="toast" role="status" hidden><span id="toastText"></span><a class="btn play" id="toastAct" hidden></a><button class="iconbtn" id="toastClose" aria-label="Schließen">✕</button></div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js"></script>
@@ -342,8 +344,36 @@ const getVodInfo = id => once('v' + id, () => api('get_vod_info', '&vod_id=' + e
 const getSeriesInfo = id => once('s' + id, () => api('get_series_info', '&series_id=' + enc(id)));
 const clearCache = () => { for (const k in memo) delete memo[k]; };
 
+/* ---------- Sprachfilter: nur deutsche und türkische Inhalte ---------- */
+let langOnly = store.get('langOnly', true);
+const langMiss = new Set();
+const KIND_LABEL = { live: 'Live TV', movie: 'Filmen', series: 'Serien' };
+const LANG_WORD = /^(deutsch|german|allemand|allemagne|alman|osterreich|oesterreich|austria|turk|tuerk|turquie)/;
+const LANG_CODE_ANY = new Set(['ger', 'tr', 'tur']);
+const LANG_CODE_FIRST = new Set(['de', 'at']);     // "de" ist in FR/ES ein normales Wort, daher nur als Kürzel am Anfang
+
+// Kategorie, z. B. "DE | Kino", "|TR| Ulusal", "GERMANY HD", "Türkiye", "VOD [DE] Action", "Sky - DE"
+function catLangOk(name) {
+  name = String(name || '');
+  const t = fold(name).split(/[^a-z0-9]+/).filter(Boolean);
+  return t.some(w => LANG_WORD.test(w) || LANG_CODE_ANY.has(w)) || LANG_CODE_FIRST.has(t[0]) ||
+    /[\[(|]\s*(DE|AT)\s*[-\])|]/.test(name) || /[-|:]\s*(DE|AT)\s*$/.test(name);
+}
+// Einzelner Titel mit Kürzel vorn, z. B. "(DE-) Film", "TR: Show TV", "|DE| RTL"
+const itemLangOk = name => /^\s*[\[(|]*\s*(DE|GER|TR|TUR|AT)\s*[-\])|:★•]/.test(String(name || ''));
+
 async function grouped(k) {
-  const [cats, items] = await Promise.all([getCats(k).catch(() => []), getItems(k)]);
+  const [cats, all] = await Promise.all([getCats(k).catch(() => []), getItems(k)]);
+  let items = all;
+  if (langOnly) {
+    const ok = new Set(cats.filter(c => catLangOk(c.category_name)).map(c => String(c.category_id)));
+    const f = all.filter(it => ok.has(String(it.cat)) || itemLangOk(it.name));
+    if (f.length) items = f;
+    else if (all.length && !langMiss.has(k)) {
+      langMiss.add(k);
+      toast(`Bei ${KIND_LABEL[k]} wurden keine deutschen oder türkischen Kategorien erkannt. Dort wird alles angezeigt.`, true);
+    }
+  }
   const by = new Map();
   for (const it of items) {
     const c = String(it.cat);
@@ -475,7 +505,7 @@ const VIEWS = {
     return { title: a?.title || '', sections: [{ items: a?.items || [] }] };
   },
   async search(q) {
-    const [m, s, l] = (await Promise.allSettled(['movie', 'series', 'live'].map(getItems)))
+    const [m, s, l] = (await Promise.allSettled(['movie', 'series', 'live'].map(k => grouped(k).then(g => g.items))))
       .map(r => r.status === 'fulfilled' ? r.value : []);
     const n = fold(q);
     const hit = items => items.filter(it => fold(it.name).includes(n)).slice(0, 60);
@@ -748,11 +778,16 @@ function stopPlayback() {
   video.load();
 }
 
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1);
+
 function startStream(src, live, name) {
   stopPlayback();
   const useTs = live && !nativeHls() && window.mpegts && mpegts.isSupported();
   const url = live ? (useTs ? src.ts : src.m3u8) : src.url;
-  const fail = why => { toast(`Wiedergabe-Fehler: ${name} (${why})\nPrüfe Verbindung ...`, true); diagnose(url, name, why); };
+  // VLC (kostenlose App) verbindet sich direkt mit dem Anbieter und spielt auch mkv/avi
+  const vlc = isIOS && src.direct
+    ? { label: 'In VLC öffnen (kostenlose App)', href: 'vlc-x-callback://x-callback-url/stream?url=' + enc(src.direct) } : null;
+  const fail = why => { toast(`Wiedergabe-Fehler: ${name} (${why})\nPrüfe Verbindung ...`, true, vlc); diagnose(url, name, why, vlc); };
   if (useTs) {
     // Live-Sender als .ts-Stream (Desktop-Browser)
     tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url }, { enableStashBuffer: false, liveBufferLatencyChasing: true });
@@ -782,14 +817,14 @@ function startStream(src, live, name) {
 }
 
 // Fragt den Proxy, was beim Anbieter wirklich passiert, und zeigt es an
-async function diagnose(url, name, why) {
-  if (!url.includes('?u=')) return toast(`Wiedergabe-Fehler: ${name} (${why})\nKein Proxy eingetragen.`, true);
+async function diagnose(url, name, why, action) {
+  if (!url.includes('?u=')) return toast(`Wiedergabe-Fehler: ${name} (${why})\nKein Proxy eingetragen.`, true, action);
   try {
     const r = await fetch(url + '&debug=1');
     const t = await r.text();
-    toast(`Wiedergabe-Fehler: ${name} (${why})\n` + (r.ok ? t : `Proxy antwortet HTTP ${r.status}: ${t.slice(0, 300)}`), true);
+    toast(`Wiedergabe-Fehler: ${name} (${why})\n` + (r.ok ? t : `Proxy antwortet HTTP ${r.status}: ${t.slice(0, 300)}`), true, action);
   } catch (e) {
-    toast(`Wiedergabe-Fehler: ${name} (${why})\nProxy nicht erreichbar: ${e.message}`, true);
+    toast(`Wiedergabe-Fehler: ${name} (${why})\nProxy nicht erreichbar: ${e.message}`, true, action);
   }
 }
 
@@ -799,8 +834,8 @@ function playLive(it, list) {
   nowPlaying = { live: true, it, list, idx: list.indexOf(it) };
   openPlayer(it.name, '');
   $('#pPrev').hidden = $('#pNext').hidden = list.length < 2;
-  const u = ext => px(`${base()}/live/${cred()}/${it.id}.${ext}`);
-  startStream({ ts: u('ts'), m3u8: u('m3u8') }, true, it.name);
+  const raw = ext => `${base()}/live/${cred()}/${it.id}.${ext}`;
+  startStream({ ts: px(raw('ts')), m3u8: px(raw('m3u8')), direct: raw('ts') }, true, it.name);
   loadEpg(it);
 }
 
@@ -821,13 +856,13 @@ async function loadEpg(it) {
   } catch {}
 }
 
-const vodUrl = e => px(`${base()}/${e.kind === 'movie' ? 'movie' : 'series'}/${cred()}/${e.id}.${e.ext || 'mp4'}`);
+const vodRaw = e => `${base()}/${e.kind === 'movie' ? 'movie' : 'series'}/${cred()}/${e.id}.${e.ext || 'mp4'}`;
 
 function playVod(e, at) {
   nowPlaying = { live: false, e, seek: at > 5 ? at : 0 };
   openPlayer(e.name, e.sub);
   $('#pPrev').hidden = $('#pNext').hidden = true;
-  startStream({ url: vodUrl(e) }, false, e.name);
+  startStream({ url: px(vodRaw(e)), direct: vodRaw(e) }, false, e.name);
   video.onended = () => {
     const r = resumes(); delete r[e.key]; store.set('resume', r);
     if (e.kind === 'ep') nextEpisode(e);
@@ -903,8 +938,11 @@ $('#pNext').onclick = () => switchChannel(1);
 
 /* ---------- Hinweise ---------- */
 let toastTimer = 0;
-function toast(msg, sticky) {
+function toast(msg, sticky, action) {
   $('#toastText').textContent = msg;
+  const a = $('#toastAct');
+  a.hidden = !action;
+  if (action) { a.textContent = action.label; a.href = action.href; }
   $('#toast').hidden = false;
   clearTimeout(toastTimer);
   if (!sticky) toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 3500);
@@ -963,7 +1001,16 @@ $('#avatar').onclick = e => {
   $('#menuInfo').textContent = info
     ? `Profil: ${cfg.user}\nStatus: ${info.status}\nGültig bis: ${fmtDate(info.exp_date)}\nVerbindungen: ${info.active_cons}/${info.max_connections}`
     : `Profil: ${cfg?.user || ''}`;
+  $('#mLang').textContent = langOnly ? 'Alle Sprachen anzeigen' : 'Nur Deutsch und Türkisch anzeigen';
   m.querySelector('button').focus();
+};
+$('#mLang').onclick = () => {
+  langOnly = !langOnly;
+  store.set('langOnly', langOnly);
+  langMiss.clear();
+  $('#menu').hidden = true;
+  toast(langOnly ? 'Es werden nur deutsche und türkische Inhalte angezeigt.' : 'Es werden alle Sprachen angezeigt.');
+  render(current, currentArg);
 };
 document.addEventListener('click', e => { if (!e.target.closest('#menu, #avatar')) $('#menu').hidden = true; });
 $('#mSettings').onclick = showLogin;

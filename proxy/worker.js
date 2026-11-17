@@ -26,6 +26,32 @@ const mask = u => String(u)
 const text = (body, status = 200) =>
   new Response(body, { status, headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8' } });
 
+// Cloudflare Workers dürfen keine reinen IP-Adressen abrufen (Antwort: "error code: 1003").
+// Viele Anbieter leiten aber auf eine IP weiter. nip.io und sslip.io sind öffentliche
+// DNS-Namen, die genau auf die enthaltene IP zeigen (1.2.3.4.nip.io -> 1.2.3.4).
+// Die Anfrage selbst geht weiterhin direkt an den Server des Anbieters.
+const IP_DNS = ['nip.io', 'sslip.io'];
+const isIp = h => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+
+async function fetchUrl(url, init) {
+  const u = new URL(url);
+  if (!isIp(u.hostname)) return fetch(url, init);
+  let lastErr;
+  for (let i = 0; i < IP_DNS.length; i++) {
+    const v = new URL(url);
+    v.hostname = `${u.hostname}.${IP_DNS[i]}`;
+    try {
+      const r = await fetch(v.toString(), init);
+      // 530 = Name nicht auflösbar: nächsten DNS-Dienst versuchen
+      if (r.status !== 530 || i === IP_DNS.length - 1) return r;
+      r.body?.cancel();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('IP-Adresse nicht erreichbar');
+}
+
 let keyPromise = null;
 function hmacKey(secret) {
   return keyPromise ??= crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
@@ -52,7 +78,7 @@ async function fetchChain(target, headers) {
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
     let res;
     try {
-      res = await fetch(url, { headers, redirect: 'manual' });
+      res = await fetchUrl(url, { headers, redirect: 'manual' });
     } catch (e) {
       hops.push({ url, error: e.message });
       return { hops, error: e.message, url };
@@ -84,7 +110,7 @@ async function image(src) {
   if (!/^https?:\/\//i.test(src)) return text('Forbidden', 403);
   let res;
   try {
-    res = await fetch(src, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 86400, cacheEverything: true } });
+    res = await fetchUrl(src, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 86400, cacheEverything: true } });
   } catch (e) {
     return text('Bild nicht erreichbar', 502);
   }
@@ -133,7 +159,8 @@ export default {
           if (value) {
             const n = value.length;
             const isTs = value[0] === 0x47;
-            sample = `\nErste Daten: ${n} Bytes` + (isTs ? ' (MPEG-TS, sieht gut aus)' :
+            const isVideo = /^(video|audio)\/|octet-stream|matroska/i.test(upstream.headers.get('Content-Type') || '');
+            sample = `\nErste Daten: ${n} Bytes` + (isTs ? ' (MPEG-TS, sieht gut aus)' : isVideo ? ' (Videodaten, sieht gut aus)' :
               ': ' + new TextDecoder().decode(value.slice(0, 200)).replace(/\s+/g, ' '));
           } else {
             sample = '\nKeine Daten empfangen';

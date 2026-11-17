@@ -14,6 +14,17 @@ Sperrt der Anbieter Cloudflare, zeigt die App das als `HTTP 403` an. Dann hilft 
 
 Tipp: In Safari auf „Teilen → Zum Home-Bildschirm“ tippen, dann startet die App wie eine normale App.
 
+## Sprachen
+
+Angezeigt werden nur deutsche und türkische Inhalte (auch Österreich). Erkannt wird das am Namen
+der Kategorie (`DE | Kino`, `GERMANY`, `TR | Ulusal`, `Türkiye` ...) oder am Kürzel vor dem Titel (`(DE-) Film`).
+Umschalten: Profil-Symbol oben rechts → „Alle Sprachen anzeigen“.
+
+## Filme im Format mkv am iPhone
+
+Kein iPhone-Browser kann `mkv` abspielen. Im Fehlerhinweis erscheint dann der Knopf „In VLC öffnen“.
+Die kostenlose App VLC spielt den Film direkt ab.
+
 ## Warum ein Heim-Proxy?
 
 IPTV Smarters ist eine native App und verbindet sich direkt vom Gerät mit dem Anbieter.
