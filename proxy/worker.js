@@ -105,23 +105,54 @@ function describe(hops) {
   }).join('\n');
 }
 
-// Poster und Senderlogos: http-Bilder kann eine https-Seite nicht anzeigen
+// Poster und Senderlogos: http-Bilder kann eine https-Seite nicht anzeigen.
+// Manche Server liefern Bilder ohne passenden Typ aus, daher zusätzlich Erkennung am Dateianfang.
+function sniffImage(b) {
+  if (!b || b.length < 12) return '';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  return '';
+}
+
 async function image(src) {
   if (!/^https?:\/\//i.test(src)) return text('Forbidden', 403);
   let res;
   try {
-    res = await fetchUrl(src, { headers: { 'User-Agent': 'Mozilla/5.0' }, cf: { cacheTtl: 86400, cacheEverything: true } });
+    res = await fetchUrl(src, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*' }, cf: { cacheTtl: 86400, cacheEverything: true } });
   } catch (e) {
     return text('Bild nicht erreichbar', 502);
   }
-  const type = res.headers.get('Content-Type') || '';
   const len = Number(res.headers.get('Content-Length') || 0);
-  if (!res.ok || !type.startsWith('image/') || len > MAX_IMAGE_BYTES) {
+  if (!res.ok || !res.body || len > MAX_IMAGE_BYTES) {
     res.body?.cancel();
     return text('Kein Bild', 415);
   }
-  return new Response(res.body, {
-    headers: { ...CORS, 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' },
+  let type = res.headers.get('Content-Type') || '';
+  let body = res.body;
+  if (!type.startsWith('image/')) {
+    const reader = res.body.getReader();
+    const first = await reader.read().catch(() => ({}));
+    type = sniffImage(first.value);
+    if (!type) {
+      reader.cancel().catch(() => {});
+      return text('Kein Bild', 415);
+    }
+    body = new ReadableStream({
+      start(c) { c.enqueue(first.value); },
+      async pull(c) {
+        const { done, value } = await reader.read();
+        if (done) c.close(); else c.enqueue(value);
+      },
+      cancel() { reader.cancel().catch(() => {}); },
+    });
+  }
+  return new Response(body, {
+    headers: {
+      ...CORS, 'Content-Type': type, 'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+    },
   });
 }
 

@@ -25,6 +25,16 @@ Tipp: In Safari auf „Teilen → Zum Home-Bildschirm“ tippen, dann startet di
 Die App vermeidet neuere Web-Technik, damit sie auch im älteren Browser des Fernsehers (Chrome 77) läuft,
 und lässt sich mit den Pfeiltasten der Fernbedienung bedienen.
 
+## Empfehlungen und Lieblingsverein
+
+- Die App merkt sich in diesem Browser, welche Sender du wie lange schaust und aus welchen Kategorien du Filme
+  und Serien startest. Daraus entstehen die Reihen „Deine Sender“, „Empfohlen für dich“ und „Weil du … gesehen hast“.
+  Zurücksetzen: Profil-Symbol → „Empfehlungen zurücksetzen“.
+- Für den Lieblingsverein (Voreinstellung Galatasaray, änderbar im Profil-Menü) zeigt die Startseite das nächste Spiel
+  und passende Sender. Der Spielplan kommt von TheSportsDB. Ab 36 Stunden vor dem Anpfiff sucht die App im Programm
+  des Anbieters nach dem Spiel.
+- Senderlogos kommen zuerst aus der Sammlung [tv-logo/tv-logos](https://github.com/tv-logo/tv-logos), sonst vom Anbieter.
+
 ## Sprachen
 
 Angezeigt werden nur deutsche und türkische Inhalte (auch Österreich). Erkannt wird das am Namen
