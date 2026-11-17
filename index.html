@@ -114,9 +114,8 @@
                     transition: transform .25s ease; }
   .chan .ctext { display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 800; font-size: 17px;
                  line-height: 1.15; letter-spacing: .4px; color: #f2f2f2; transition: transform .25s ease; }
-  .chan .cname { margin-top: 10px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  .chan .cname { margin-top: 8px; font-size: 12px; font-weight: 700; letter-spacing: .3px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
                  transition: color .2s ease; }
-  .chan.nologo .cname { visibility: hidden; }
   @media (hover: hover) {
     .card.chan:hover { transform: none; box-shadow: none; background: rgba(255,255,255,.07); }
     .chan:hover .logo img, .chan:hover .ctext { transform: scale(1.12); }
@@ -126,7 +125,6 @@
   .chan:focus-visible .logo img, .chan:focus-visible .ctext { transform: scale(1.12); }
   .chan:focus-visible .cname { color: #fff; }
   .more-card.chan { display: flex; align-items: center; justify-content: center; color: var(--link); font-size: 14px; }
-  .chan .cnote { margin-top: 3px; font-size: 12px; font-weight: 700; line-height: 1.25; color: var(--accent); }
 
   /* Nächstes Spiel des Lieblingsvereins: normale Reihe mit einer Infozeile */
   .match h2 { flex-wrap: wrap; gap: 2px 14px; }
@@ -532,6 +530,18 @@ function popRank(it) {
   return (it.rank = r);
 }
 const byPopularity = items => items.map((it, i) => [it, i]).sort((a, b) => popRank(a[0]) - popRank(b[0]) || a[1] - b[1]).map(x => x[0]);
+// Gleiche Sender nebeneinander, beste Auflösung links. Die Reihenfolge der Sender untereinander bleibt.
+function groupVariants(items) {
+  const groups = new Map();
+  items.forEach(it => {
+    const k = chanKey(it.name) || 'id' + it.id;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(it);
+  });
+  const out = [];
+  groups.forEach(g => byQuality(g).forEach(it => out.push(it)));
+  return out;
+}
 
 const isTurkish = name => fold(name).split(/[^a-z0-9]+/).some(w => w === 'tr' || w === 'tur' || /^(turk|tuerk|turquie)/.test(w));
 
@@ -564,7 +574,7 @@ async function grouped(k) {
   const count = {};
   groups.forEach(g => { count[g.title] = (count[g.title] || 0) + 1; });
   groups.forEach(g => { if (count[g.title] > 1 && g.tr) g.title += ' · Türkisch'; });
-  if (k === 'live') groups.forEach(g => { g.items = byPopularity(g.items); });
+  if (k === 'live') groups.forEach(g => { g.items = groupVariants(byPopularity(g.items)); });
   const known = new Set(cats.map(c => String(c.category_id)));
   const rest = items.filter(it => !known.has(String(it.cat)));
   if (rest.length) groups.push({ title: 'Weitere', items: rest });
@@ -876,7 +886,7 @@ function matchBox(live, all) {
       const items = res.best.concat(res.others).slice(0, 24);
       const now = Date.now(), day = dayKey(m.ts) === dayKey(now) ? 'Heute' : dayKey(m.ts) === dayKey(now + 864e5) ? 'Morgen' : fmtDay(m.ts);
       const meta = [leagueName(m.league), `${day}, ${fmtClock(m.ts)} Uhr`, m.venue].filter(Boolean).join(' · ');
-      const row = items.length ? buildRow({ title: '', items, cardOpts: it => ({ note: quality(it.raw).label }) }) : el('section', 'row');
+      const row = items.length ? buildRow({ title: '', items }) : el('section', 'row');
       const h = row.querySelector('h2') || row.appendChild(el('h2'));
       setKids(h);
       if (now >= m.ts && now <= m.ts + MATCH_LEN) h.append(el('span', 'mlive', 'LIVE'));
@@ -1043,8 +1053,8 @@ function card(it, o = {}, ctx) {
     const noLogo = () => { setKids(logo, el('div', 'ctext', it.name)); c.classList.add('nologo'); };
     const im = channelLogo(it, noLogo);
     if (im) logo.append(im);
-    c.append(logo, el('div', 'cname', it.name));
-    if (o.note) c.append(el('div', 'cnote', o.note));
+    // unter dem Logo steht nur die Variante (4K, Full HD, HEVC ...), kein Sendername
+    c.append(logo, el('div', 'cname', quality(it.raw || it.name).label || '\u00a0'));
     return c;
   }
   const fb = el('div', 'fallback', it.name);
