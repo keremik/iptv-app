@@ -150,6 +150,10 @@ an den Anbieter, ohne fremden Server dazwischen. Die App läuft auch mit ältere
   Qualitätsstufe von Anfang an und die beste Fassung eines Films (z. B. 4K statt HD in derselben Sprache).
 - **Bildwiederholrate:** Der Fernseher wird auf die Bildrate der Sendung umgestellt (50 Hz für Fußball und
   deutsches TV, 24 Hz für Filme). Abschaltbar unter Einstellungen → Bildwiederholrate.
+- **Kein Hängen bei Live-TV (wie TiviMate/VLC):** Live startet mit 2,5 s Vorlauf-Polster, nach einem Aussetzer
+  wird 5 s gesammelt, damit kurze Lücken des Anbieters nicht sichtbar werden. WLAN-Energiesparen ist während
+  der Wiedergabe aus. Steht die Verbindung (4 s keine neuen Daten), wird sofort neu verbunden statt zu warten.
+  TS-Streams ohne Bildmarkierungen bleiben nicht mehr im Puffern stecken.
 - **Ausfallsicherheit:** Bricht ein Stream ab, verbindet der Player sofort neu (mehrere schnelle Versuche,
   erst HLS, dann TS). Klappt das nicht, wechselt er automatisch auf eine andere Variante desselben Senders
   (z. B. FHD → HD → Ersatz), beim Spiel des Lieblingsvereins auch auf einen anderen Sender mit dem Spiel.

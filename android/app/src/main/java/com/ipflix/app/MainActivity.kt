@@ -81,6 +81,8 @@ class MainActivity : AppCompatActivity() {
   private var attempts = 0
   private var authRetry = false
   private var stallSince = 0L
+  private var lastBuffered = 0L
+  private var lastProgress = 0L
   private var retryTask: Runnable? = null
   private lateinit var statusView: TextView
   // Bildwiederholrate an die Sendung anpassen (50 Hz für Fernsehen, 24 Hz für Filme)
@@ -148,11 +150,19 @@ class MainActivity : AppCompatActivity() {
     root.addView(webView, matchParent())
 
     // Puffer für flüssige Wiedergabe: schneller Start (1,5 s), danach bis 50 s vorladen; nach einem Hänger 3 s sammeln
-    val loadControl = DefaultLoadControl.Builder()
-      .setBufferDurationsMs(20_000, 50_000, 1_000, 2_500)
-      .setTargetBufferBytes(96 * 1024 * 1024)
-      .setPrioritizeTimeOverSizeThresholds(false)
-      .build()
+    // Live braucht einen Vorlauf-Polster wie bei TiviMate/VLC: Start nach 2,5 s, nach einem Aussetzer 5 s sammeln.
+    // Filme starten weiter nach 1 s.
+    val loadControl = object : DefaultLoadControl(
+      androidx.media3.exoplayer.upstream.DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+      20_000, 50_000, 1_000, 2_500, 96 * 1024 * 1024, false, 0, false) {
+      override fun shouldStartPlayback(timeline: androidx.media3.common.Timeline,
+                                       id: androidx.media3.exoplayer.source.MediaSource.MediaPeriodId,
+                                       bufferedDurationUs: Long, playbackSpeed: Float, rebuffering: Boolean,
+                                       targetLiveOffsetUs: Long): Boolean {
+        if (!isLive) return super.shouldStartPlayback(timeline, id, bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
+        return bufferedDurationUs >= (if (rebuffering) LIVE_REBUFFER_US else LIVE_START_US)
+      }
+    }
     // Beste Qualität von Anfang an: hohe Startschätzung der Bandbreite statt mit der kleinsten Stufe zu beginnen
     val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(25_000_000L).build()
     val selector = DefaultTrackSelector(this).apply {
@@ -173,6 +183,8 @@ class MainActivity : AppCompatActivity() {
           .setUsage(C.USAGE_MEDIA).build(),
         true)
       it.setHandleAudioBecomingNoisy(true)
+      // WLAN-Energiesparen während der Wiedergabe aus (sonst Datenlücken = Hänger), Gerät bleibt wach
+      it.setWakeMode(C.WAKE_MODE_NETWORK)
     }
     playerView = PlayerView(this).apply {
       player = this@MainActivity.player
@@ -286,7 +298,7 @@ class MainActivity : AppCompatActivity() {
       .setUserAgent(UA)
       .setAllowCrossProtocolRedirects(true)
       .setConnectTimeoutMs(8000)
-      .setReadTimeoutMs(10000)
+      .setReadTimeoutMs(8000)
       .setKeepPostFor302Redirects(true)
     // Kurze Aussetzer überbrückt der Player selbst (ohne Puffer zu verlieren): schnell und mehrfach neu versuchen
     val retry = object : DefaultLoadErrorHandlingPolicy(2) {
@@ -296,7 +308,10 @@ class MainActivity : AppCompatActivity() {
         return minOf(info.errorCount * 300L, 800L)
       }
     }
-    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)).setLoadErrorHandlingPolicy(retry)
+    // TS-Streams ohne Bildmarkierungen (AUD) sonst endlos im Puffern: Bildgrenzen selbst erkennen
+    val extractors = androidx.media3.extractor.DefaultExtractorsFactory()
+      .setTsExtractorFlags(androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
+    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors).setLoadErrorHandlingPolicy(retry)
   }
 
   // ---------- Ausfallsicherheit ----------
@@ -328,6 +343,7 @@ class MainActivity : AppCompatActivity() {
     val pos = p.currentPosition
     if (isLive) p.setMediaItem(MediaItem.fromUri(u)) else p.setMediaItem(MediaItem.fromUri(u), pos)
     p.prepare(); p.playWhenReady = true
+    stallSince = 0; lastBuffered = 0; lastProgress = SystemClock.uptimeMillis()
   }
 
   // Verbindung weg, Anbieter-Fehler oder Hänger: erst schnell neu verbinden, dann andere Adresse (HLS/TS),
@@ -377,10 +393,20 @@ class MainActivity : AppCompatActivity() {
     override fun run() {
       if (overlay.visibility != View.VISIBLE) return
       val p = player
+      val now = SystemClock.uptimeMillis()
+      // Kommen noch Daten an? Dann nur warten. Steht die Verbindung (keine neuen Daten), sofort neu verbinden.
+      if (p != null) {
+        val buf = p.bufferedPosition
+        if (buf > lastBuffered + 100 || buf < lastBuffered) lastProgress = now
+        lastBuffered = buf
+      }
       if (p != null && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING) {
-        val now = SystemClock.uptimeMillis()
         if (stallSince == 0L) stallSince = now
-        else if (now - stallSince > (if (isLive) 10_000 else 20_000)) recover(null)
+        // TS liefert laufend Daten (4 s ohne Daten = tot); HLS kommt in Stücken, dort länger warten
+        val ts = urls.getOrNull(urlIdx)?.substringBefore('?')?.endsWith(".ts") == true
+        val dead = now - lastProgress > (if (isLive && ts) 4_000 else if (isLive) 12_000 else 8_000)   // Verbindung tot
+        val long = now - stallSince > (if (isLive) 15_000 else 25_000)        // kommt zu langsam
+        if (dead || long) recover(null)
       } else stallSince = 0
       main.postDelayed(this, 1000)
     }
@@ -577,6 +603,7 @@ class MainActivity : AppCompatActivity() {
     isLive = live
     urls = listOf(url, alt).filter { it.isNotEmpty() }.distinct()
     urlIdx = 0; attempts = 0; authRetry = false; stallSince = 0
+    lastBuffered = 0; lastProgress = SystemClock.uptimeMillis()
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     showStatus(null)
     titleView.text = title
@@ -787,7 +814,11 @@ class MainActivity : AppCompatActivity() {
     super.onDestroy()
   }
 
-  companion object { const val UA = "IPTVSmartersPro" }
+  companion object {
+    const val UA = "IPTVSmartersPro"
+    const val LIVE_START_US = 2_500_000L
+    const val LIVE_REBUFFER_US = 5_000_000L
+  }
 
   private fun matchParent() = FrameLayout.LayoutParams(
     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
