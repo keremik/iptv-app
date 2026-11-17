@@ -412,9 +412,16 @@ function nativeStart(src, live, name) {
 // Rückmeldungen des nativen Players
 window.__player = {
   time: function (pos, dur) { appPos = +pos || 0; appDur = +dur || 0; saveProgress(false); },
-  ended: function () { var h = nowPlaying && nowPlaying.endHandler; if (h) h(); },
+  ended: function () {
+    if (nowPlaying && !nowPlaying.live) nowPlaying.done = true;   // fertig geschaut: Fortschritt nicht erneut speichern
+    var h = nowPlaying && nowPlaying.endHandler; if (h) h();
+  },
   back: function () { closePlayer(); },
-  error: function (msg) { toast('Wiedergabe-Fehler: ' + (msg || ''), true); },
+  error: function (msg) { endLive(); toast('Wiedergabe-Fehler: ' + (msg || ''), true); closePlayer(); },
+  playing: function () { markPlaying(); },
+  // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
+  hidden: function () { endLive(); saveProgress(true); },
+  shown: function () { if (nowPlaying && nowPlaying.live && !liveSession) liveSession = { it: nowPlaying.it, start: 0 }; },
   switch: function (step) { switchChannel(+step); },
 };
 function nativeSubtitle(t) { if (APP && window.NativePlayer.subtitle) { try { window.NativePlayer.subtitle(t || ''); } catch (e) {} } }
@@ -738,7 +745,7 @@ function toggleFav(it) {
   const had = isFav(it);
   const keep = ({ kind, id, name, img, ext, backdrop, plot, year, rating, genre, cat }) => ({ kind, id, name, img, ext, backdrop, plot, year, rating, genre, cat });
   store.set('favs', had ? favs().filter(f => !(f.kind === it.kind && String(f.id) === String(it.id))) : [keep(it), ...favs()]);
-  if (!had) bumpCat(it.kind, it.cat, 2);
+  if (!had) bumpCat(it.kind, it.cat, 2, it.genre);
   toast(had ? 'Aus „Meine Liste“ entfernt' : 'Zu „Meine Liste“ hinzugefügt');
   return !had;
 }
@@ -746,15 +753,17 @@ const resumes = () => store.get('resume', {});
 
 /* ---------- Sehgewohnheiten und Empfehlungen (bleiben in diesem Browser) ---------- */
 let prefs = store.get('prefs', null) || {};
-['chan', 'cat', 'seen', 'last'].forEach(k => { if (!prefs[k]) prefs[k] = {}; });
+['chan', 'cat', 'seen', 'last', 'genre'].forEach(k => { if (!prefs[k]) prefs[k] = {}; });
 const savePrefs = () => store.set('prefs', prefs);
 let liveSession = null;
 
-// Sender zählt erst nach 20 Sekunden, Durchzappen verfälscht sonst die Liste
+// Gezählt wird nur echte Wiedergabe (ab dem ersten Bild), und erst nach 20 Sekunden:
+// ein Stream, der nicht startet, oder Durchzappen verfälscht sonst die Liste.
+function markPlaying() { if (liveSession && !liveSession.start) liveSession.start = Date.now(); }
 function endLive() {
   const s = liveSession;
   liveSession = null;
-  if (!s) return;
+  if (!s || !s.start) return;
   const sec = (Date.now() - s.start) / 1000;
   if (sec < 20) return;
   const c = prefs.chan[s.it.id] || (prefs.chan[s.it.id] = { n: 0, t: 0 });
@@ -763,6 +772,11 @@ function endLive() {
 }
 // Sehzeit zählt, ältere Gewohnheiten verblassen (Halbwertszeit 3 Wochen)
 const chanScore = c => (c.t + c.n * 120) * Math.pow(0.5, (Date.now() - c.last) / (21 * 864e5));
+function recentChannels(all, max) {
+  const by = new Map(all.map(it => [String(it.id), it]));
+  return Object.keys(prefs.chan).filter(id => by.has(id) && prefs.chan[id].last)
+    .sort((a, b) => prefs.chan[b].last - prefs.chan[a].last).slice(0, max).map(id => by.get(id));
+}
 function topChannels(all, max) {
   const by = new Map(all.map(it => [String(it.id), it]));
   return Object.keys(prefs.chan).filter(id => by.has(id))
@@ -771,10 +785,27 @@ function topChannels(all, max) {
 
 const vodKind = e => e.kind === 'movie' ? 'movie' : 'series';
 const seenKey = (kind, id) => (kind === 'movie' ? 'm' : 's') + id;
-function bumpCat(kind, cat, pts) {
-  if (cat == null || cat === '') return;
-  const k = kind + ':' + cat;
-  prefs.cat[k] = (prefs.cat[k] || 0) + pts;
+// Ältere Vorlieben verblassen (Halbwertszeit 30 Tage), damit Neues mehr zählt
+function decayPrefs() {
+  const now = Date.now(), last = prefs.decayTs || now;
+  const f = Math.pow(0.5, (now - last) / (30 * 864e5));
+  if (f < 0.999) {
+    ['cat', 'genre'].forEach(t => Object.keys(prefs[t]).forEach(k => {
+      prefs[t][k] *= f;
+      if (prefs[t][k] < 0.05) delete prefs[t][k];
+    }));
+  }
+  prefs.decayTs = now;
+}
+// Genres aus dem Anbieter ("Krimi, Drama" / "Action/Thriller")
+const genresOf = g => String(g || '').split(/[,/&|;]+/).map(x => fold(x).trim()).filter(x => x.length > 2);
+function bumpCat(kind, cat, pts, genre) {
+  decayPrefs();
+  if (cat != null && cat !== '') {
+    const k = kind + ':' + cat;
+    prefs.cat[k] = (prefs.cat[k] || 0) + pts;
+  }
+  genresOf(genre).forEach(g => { const k = kind + ':' + g; prefs.genre[k] = (prefs.genre[k] || 0) + pts; });
   savePrefs();
 }
 function markSeen(e) {
@@ -793,14 +824,17 @@ const notSeen = kind => {
 const byAppeal = items => [...items].sort((a, b) =>
   ((parseFloat(b.rating) || 0) >= 7 ? 1 : 0) - ((parseFloat(a.rating) || 0) >= 7 ? 1 : 0) || b.added - a.added);
 
-// Vorschläge aus den Kategorien (Genres), die am meisten geschaut werden; mehr Punkte = öfter in der Reihe
+// Vorschläge aus den Kategorien und echten Genres, die am meisten geschaut werden;
+// mehr Punkte = öfter in der Reihe. Schon Gesehenes kommt nicht noch einmal.
 function recommend(kind, items, max) {
   const pre = kind + ':';
-  const cats = Object.keys(prefs.cat).filter(k => k.startsWith(pre))
-    .map(k => ({ cat: k.slice(pre.length), s: prefs.cat[k] })).sort((a, b) => b.s - a.s).slice(0, 4);
+  const top = (t, n) => Object.keys(prefs[t]).filter(k => k.startsWith(pre))
+    .map(k => ({ t, v: k.slice(pre.length), s: prefs[t][k] })).sort((a, b) => b.s - a.s).slice(0, n);
+  const cats = top('cat', 4).concat(top('genre', 3));
   if (!cats.length) return [];
   const fresh = notSeen(kind);
-  const pools = cats.map(c => byAppeal(items.filter(it => String(it.cat) === c.cat && fresh(it))));
+  const pools = cats.map(c => byAppeal(items.filter(it => fresh(it) &&
+    (c.t === 'cat' ? String(it.cat) === c.v : genresOf(it.genre).indexOf(c.v) >= 0))));
   const total = cats.reduce((a, c) => a + c.s, 0), credit = cats.map(() => 0), out = [];
   while (out.length < max) {
     let best = -1;
@@ -811,7 +845,8 @@ function recommend(kind, items, max) {
     }
     if (best < 0) break;
     credit[best] -= 1;
-    out.push(pools[best].shift());
+    const it = pools[best].shift();
+    if (out.indexOf(it) < 0) out.push(it);
   }
   return out;
 }
@@ -992,25 +1027,43 @@ async function matchChannels(m, live, all) {
     : /sky ?sport|dazn|bein|eurosport|sport ?1\b|tnt ?sport|magenta|canal\+|movistar|a ?spor\b|trt ?spor|tabii|s ?sport|tivibu/;
   const likely = family.concat(live.filter(it => usual.test(f(it)) && family.indexOf(it) < 0));
   let hits = [];
-  if (m.ts - Date.now() < 36 * 3600e3) {
+  // Automatische Suche im Programm des Anbieters: ab 48 Stunden vor Anpfiff, alle 20 Minuten neu.
+  if (m.ts - Date.now() < 48 * 3600e3) {
     if (!epgScans[m.id] || Date.now() - epgScans[m.id].ts > 20 * 60e3) {
       const sport = /bein|spor|sport|tivibu|trt ?1\b|\batv\b|tabii|exxen|dazn|tv ?8|sky|canal|movistar|tnt|magenta|eurosport|zdf|das erste|rtl/;
-      const cands = main.concat(likely.filter(it => main.indexOf(it) < 0), live.filter(it => sport.test(f(it)) && likely.indexOf(it) < 0 && main.indexOf(it) < 0)).slice(0, 40);
+      // je Sender nur eine Variante prüfen (4K/FHD/HD haben dasselbe Programm), dafür mehr verschiedene Sender
+      const pool = main.concat(likely, named, live.filter(it => sport.test(f(it)))), seenKeys = {}, cands = [];
+      pool.forEach(it => { const k = chanKey(it.name) || 'id' + it.id; if (!seenKeys[k] && cands.length < 60) { seenKeys[k] = 1; cands.push(it); } });
+      const mine = fold(m.isHome ? m.home : m.away), opp = fold(m.isHome ? m.away : m.home);
+      const ALIAS = { galatasaray: ['g.saray', 'gsaray', 'g. saray', 'cimbom'], fenerbahce: ['f.bahce', 'fbahce', 'fener'], besiktas: ['bjk', 'kartal'], trabzonspor: ['trabzon'] };
+      const names = n => { const a = [n].concat(ALIAS[n] || []); const w = n.split(' ')[0]; if (w.length >= 5 && w !== n) a.push(w); return a; };
+      const mineNames = names(mine).concat(names(key)), oppNames = names(opp);
+      const has = (txt, list) => list.some(x => x && txt.indexOf(x) >= 0);
       const out = [];
       let next = 0;
       const worker = async () => {
         while (next < cands.length) {
           const it = cands[next++];
           try {
-            const d = await api('get_short_epg', `&stream_id=${enc(it.id)}&limit=12`);
-            const hit = arr(d.epg_listings).filter(x => fold(b64(x.title) + ' ' + b64(x.description)).includes(key) &&
-              x.stop_timestamp * 1000 > Date.now() && Math.abs(x.start_timestamp * 1000 - m.ts) < 6 * 3600e3)[0];
-            if (hit) out.push({ it, start: hit.start_timestamp * 1000 });
+            const d = await api('get_short_epg', `&stream_id=${enc(it.id)}&limit=24`);
+            // Treffer: Verein genannt und (Gegner genannt oder Sendung beginnt zur Anstoßzeit).
+            // "stark" = beginnt höchstens 20 Minuten neben dem Anpfiff (das eigentliche Spiel).
+            let hit = null;
+            arr(d.epg_listings).forEach(x => {
+              const txt = fold(b64(x.title) + ' ' + b64(x.description));
+              const diff = Math.abs(x.start_timestamp * 1000 - m.ts);
+              if (x.stop_timestamp * 1000 < Date.now() || diff > 3 * 3600e3 || !has(txt, mineNames)) return;
+              if (!has(txt, oppNames) && diff > 45 * 60e3) return;
+              if (!hit || diff < hit.diff) hit = { it, start: x.start_timestamp * 1000, diff, strong: diff <= 20 * 60e3 };
+            });
+            if (hit) out.push(hit);
           } catch (e) {}
         }
       };
-      await Promise.all([worker(), worker(), worker()]);
-      epgScans[m.id] = { ts: Date.now(), out };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      // gibt es Sendungen genau zum Anpfiff, zählen nur diese (Vorberichte auf anderen Sendern fallen weg)
+      const strong = out.filter(h => h.strong);
+      epgScans[m.id] = { ts: Date.now(), out: strong.length ? strong : out };
     }
     hits = epgScans[m.id].out;
   }
@@ -1062,6 +1115,7 @@ const VIEWS = {
       ? becauseRow('series', S.items) || becauseRow('movie', M.items)
       : becauseRow('movie', M.items) || becauseRow('series', S.items);
     const rows = [resumeRow(),
+      { title: 'Zuletzt gesehene Sender', items: recentChannels(L.all, 12) },
       { title: 'Deine Sender', items: topChannels(L.all, 14) },
       { title: 'Empfohlen für dich', items: mix(recM, recS).slice(0, 40) },
       favRow(), because,
@@ -1077,7 +1131,8 @@ const VIEWS = {
   },
   async live() {
     const L = await grouped('live');
-    return { title: 'Live TV', top: [matchBox(L.items, L.all)], rows: [{ title: 'Deine Sender', items: topChannels(L.all, 14) }, ...L.groups] };
+    return { title: 'Live TV', top: [matchBox(L.items, L.all)],
+             rows: [{ title: 'Zuletzt gesehen', items: recentChannels(L.all, 12) }, { title: 'Deine Sender', items: topChannels(L.all, 14) }, ...L.groups] };
   },
   async movie() {
     const M = await grouped('movie'), rec = recommend('movie', M.items, 40);
@@ -1358,6 +1413,7 @@ async function showDetails(it) {
     if (it.kind === 'movie') {
       const d = await getVodInfo(it.id), i = d.info || {};
       if (d.movie_data && d.movie_data.container_extension) it.ext = d.movie_data.container_extension;
+      if (i.genre) it.genre = i.genre;
       setBg(top, first(i.backdrop_path));
       plot.textContent = i.plot || i.description || it.plot || '';
       fillMeta(meta, { ...it, year: year(i.releasedate) || it.year, rating: i.rating || it.rating, genre: i.genre, duration: i.duration });
@@ -1576,7 +1632,7 @@ function playLive(it, list) {
   list = (list || [it]).filter(x => x.kind === 'live');
   if (!list.includes(it)) list = [it];
   endLive();
-  liveSession = { it, start: Date.now() };
+  liveSession = { it, start: 0 };          // start wird beim ersten Bild gesetzt
   nowPlaying = { live: true, it, list, idx: list.indexOf(it) };
   openPlayer(it.name, '');
   $('#pPrev').hidden = $('#pNext').hidden = list.length < 2;
@@ -1607,7 +1663,7 @@ async function loadEpg(it) {
 const vodRaw = e => `${base()}/${e.kind === 'movie' ? 'movie' : 'series'}/${cred()}/${e.id}.${e.ext || 'mp4'}`;
 
 function playVod(e, at) {
-  bumpCat(vodKind(e), e.cat, 1);
+  bumpCat(vodKind(e), e.cat, 1, e.genre);
   markSeen(e);
   // mkv, avi usw. kann kein iPhone- oder iPad-Browser abspielen: gleich VLC anbieten
   if (isIOS && /^(mkv|avi|wmv|flv)$/i.test(e.ext || '')) {
@@ -1620,6 +1676,7 @@ function playVod(e, at) {
   $('#pPrev').hidden = $('#pNext').hidden = true;
   startStream({ url: px(vodRaw(e)), rawUrl: vodRaw(e), direct: abs(px(vodRaw(e))) }, false, e.name);
   const onEnd = () => {
+    if (nowPlaying) nowPlaying.done = true;
     const r = resumes(); delete r[e.key]; store.set('resume', r);
     if (e.kind === 'ep') nextEpisode(e);
   };
@@ -1628,14 +1685,14 @@ function playVod(e, at) {
 }
 
 function playMovie(it) {
-  const e = { key: 'm' + it.id, kind: 'movie', id: it.id, ext: it.ext || 'mp4', name: it.name, img: it.img, cat: it.cat };
+  const e = { key: 'm' + it.id, kind: 'movie', id: it.id, ext: it.ext || 'mp4', name: it.name, img: it.img, cat: it.cat, genre: it.genre };
   playVod(e, (resumeOf(e.key) || {}).t);
 }
 
 function playEpisode(series, ep, season) {
   const e = { key: 'e' + ep.id, kind: 'ep', id: ep.id, ext: ep.container_extension || 'mp4', name: series.name,
               sub: `S${season} F${ep.episode_num || ''} · ${chanName(ep.title)}`.replace(/ · $/, ''), img: series.img,
-              seriesId: series.id, season, cat: series.cat };
+              seriesId: series.id, season, cat: series.cat, genre: series.genre };
   playVod(e, (resumeOf(e.key) || {}).t);
 }
 
@@ -1657,21 +1714,21 @@ async function nextEpisode(e) {
     const i = all.findIndex(x => String(x.ep.id) === String(e.id));
     if (i >= 0 && all[i + 1] && nowPlaying && nowPlaying.e === e) {
       toast('Nächste Folge ...');
-      playEpisode({ id: e.seriesId, name: e.name, img: e.img, cat: e.cat }, all[i + 1].ep, all[i + 1].s);
+      playEpisode({ id: e.seriesId, name: e.name, img: e.img, cat: e.cat, genre: e.genre }, all[i + 1].ep, all[i + 1].s);
     }
   } catch (e) {}
 }
 
 function saveProgress(force) {
   const np = nowPlaying;
-  if (!np || np.live) return;
+  if (!np || np.live || np.done) return;
   const t = curTime(), d = curDur();
   if (!isFinite(d) || d <= 0) return;
   const now = Date.now();
   if (!force && now - lastSave < 5000) return;
   lastSave = now;
   // wirklich geschaut (15 Minuten oder die Hälfte): Kategorie zählt stärker
-  if (!np.credited && (t > 900 || t / d > 0.5)) { np.credited = true; bumpCat(vodKind(np.e), np.e.cat, 3); }
+  if (!np.credited && (t > 900 || t / d > 0.5)) { np.credited = true; bumpCat(vodKind(np.e), np.e.cat, 3, np.e.genre); }
   const r = resumes();
   if (t / d > 0.95) delete r[np.e.key];
   else if (t > 10) r[np.e.key] = { ...np.e, t, d, ts: now };
@@ -1682,6 +1739,7 @@ function saveProgress(force) {
 
 video.addEventListener('timeupdate', () => saveProgress(false));
 window.addEventListener('pagehide', () => { endLive(); saveProgress(true); });
+video.addEventListener('playing', () => markPlaying());
 video.addEventListener('pause', () => saveProgress(true));
 video.addEventListener('loadedmetadata', () => {
   if (nowPlaying && nowPlaying.seek) { try { video.currentTime = nowPlaying.seek; } catch (e) {} nowPlaying.seek = 0; }

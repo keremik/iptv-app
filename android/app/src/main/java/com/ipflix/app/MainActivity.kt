@@ -211,9 +211,14 @@ class MainActivity : AppCompatActivity() {
           p.setMediaItem(MediaItem.fromUri(altUrl)); p.prepare(); p.playWhenReady = true
         }
       } else {
-        runJs("window.__player&&__player.error&&__player.error(" + jsStr(error.errorCodeName) + ")")
         hidePlayer()
+        runJs("window.__player&&__player.error&&__player.error(" + jsStr(error.errorCodeName) + ")")
       }
+    }
+
+    // Erstes Bild laeuft: erst ab jetzt zaehlt die Sehzeit fuer "Deine Sender"
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+      if (isPlaying) runJs("window.__player&&__player.playing&&__player.playing()")
     }
 
     override fun onPlaybackStateChanged(state: Int) {
@@ -221,14 +226,16 @@ class MainActivity : AppCompatActivity() {
       if (state == Player.STATE_ENDED) {
         if (isLive) {
           // Live-Stream vom Anbieter beendet: zurueck zur Liste mit Hinweis.
-          runJs("window.__player&&__player.error&&__player.error(" + jsStr("Live-Stream beendet") + ")")
           hidePlayer()
+          runJs("window.__player&&__player.error&&__player.error(" + jsStr("Live-Stream beendet") + ")")
         } else {
           val tok = playToken
           runJs("window.__player&&__player.ended&&__player.ended()")
           // Spielt die Oberflaeche nichts Neues an (z. B. Film zu Ende), Player schliessen.
           main.postDelayed({
-            if (playToken == tok && player?.playbackState == Player.STATE_ENDED) hidePlayer()
+            if (playToken == tok && player?.playbackState == Player.STATE_ENDED) {
+              hidePlayer(); runJs("window.__player&&__player.back&&__player.back()")
+            }
           }, 1500)
         }
       }
@@ -336,7 +343,15 @@ class MainActivity : AppCompatActivity() {
     return super.dispatchKeyEvent(event)
   }
 
-  override fun onPause() { super.onPause(); player?.pause() }
+  // App verlassen (z. B. Home-Taste): Sehzeit und Fortschritt sichern; beim Zurueckkommen neu beginnen
+  override fun onPause() {
+    runJs("window.__player&&__player.hidden&&__player.hidden()")
+    super.onPause(); player?.pause()
+  }
+  override fun onResume() {
+    super.onResume()
+    runJs("window.__player&&__player.shown&&__player.shown()")
+  }
 
   override fun onDestroy() {
     main.removeCallbacksAndMessages(null)
