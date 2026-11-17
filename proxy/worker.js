@@ -23,11 +23,21 @@ export default {
       return new Response('Forbidden', { status: 403, headers: CORS });
     }
 
-    const headers = {};
+    const headers = { 'User-Agent': 'IPTVSmartersPro' };
     const range = request.headers.get('Range');
     if (range) headers['Range'] = range;
 
-    const upstream = await fetch(target, { headers, redirect: 'follow' });
+    let upstream;
+    try {
+      upstream = await fetch(target, { headers, redirect: 'follow' });
+    } catch (e) {
+      return new Response('Upstream nicht erreichbar: ' + e.message, { status: 502, headers: CORS });
+    }
+
+    if (!upstream.ok && upstream.status !== 206) {
+      return new Response('Upstream HTTP ' + upstream.status, { status: upstream.status, headers: CORS });
+    }
+
     const type = upstream.headers.get('Content-Type') || '';
     const isPlaylist = target.includes('.m3u8') || type.includes('mpegurl');
 
