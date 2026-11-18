@@ -27,7 +27,8 @@ Gerät und braucht keinen fremden Server.
   - Fällt ein Sender aus, wechselt die App automatisch auf eine gleichwertige Variante.
   - Ohne Internet wartet sie und spielt weiter, sobald es zurück ist.
 - **Schnellstart:** Die Listen des Anbieters werden auf dem Gerät gespeichert. Die App startet sofort mit dem
-  letzten Stand und aktualisiert im Hintergrund (beim Start, beim Zurückkehren, alle 6 Stunden).
+  letzten Stand und aktualisiert im Hintergrund: bei jedem Start, beim Einschalten des Fernsehers (wenn der letzte
+  Stand älter als 10 Minuten ist) und alle 6 Stunden. Ist das WLAN beim Einschalten noch nicht da, versucht sie es erneut.
 - **Beim Einschalten starten** (Einstellungen, abschaltbar): IPFLIX öffnet sich, wenn der Stick hochfährt oder aus
   dem Standby aufwacht. Android verlangt dafür einmal die Erlaubnis „Über anderen Apps einblenden“.
 - **Stabil:** Beendet Android die Oberfläche (z. B. bei knappem Speicher), baut die App sie neu auf statt abzustürzen.

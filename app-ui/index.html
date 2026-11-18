@@ -448,7 +448,7 @@ window.__player = {
   hidden: function () { endLive(); saveProgress(true); },
   shown: function () {
     if (bootPending && bootState() === 'on') { bootPending = false; toast('IPFLIX startet jetzt beim Einschalten.'); if (!$('#setup').hidden) { $('#bootHint').hidden = true; bootWas = 'on'; } }
-    listsMaybeRefresh('resume', 2 * 3600e3); if (nowPlaying && nowPlaying.live && !liveSession) liveSession = { it: nowPlaying.it, start: 0 }; },
+    listsMaybeRefresh('resume', 10 * 60e3); if (nowPlaying && nowPlaying.live && !liveSession) liveSession = { it: nowPlaying.it, start: 0 }; },
   switch: function (step) { switchChannel(+step); },
   // Senderliste im Player: Eintrag gewählt / vorheriger Sender / Sendernummer eingetippt
   pick: function (i) { const np = nowPlaying; if (np && np.live && np.list[i]) playLive(np.list[i], np.list); },
@@ -582,7 +582,7 @@ const memo = {};
 const once = (key, fn) => memo[key] || (memo[key] = fn().catch(e => { delete memo[key]; throw e; }));
 
 // Listen des Anbieters (Sender, Filme, Serien) auf dem Gerät zwischenspeichern: die App startet sofort mit dem
-// letzten Stand, die Aktualisierung läuft im Hintergrund (beim Start, beim Zurückkehren, alle 6 Stunden).
+// letzten Stand, die Aktualisierung läuft im Hintergrund (bei jedem Start, beim Zurückkehren bzw. Einschalten des Fernsehers, alle 6 Stunden).
 const LIST_CACHE = 'ipflix-lists-v1';
 let listFresh = false;                 // true = Zwischenspeicher übergehen (Menü "Listen neu laden")
 const listKey = action => 'https://lists.ipflix.local/' + encodeURIComponent(base() + '|' + cfg.user) + '/' + action;
@@ -601,12 +601,13 @@ async function writeList(action, data) {
   } catch (e) {}
 }
 const listSig = d => Array.isArray(d) ? d.length + ':' + JSON.stringify(d[0] || 0).length + ':' + JSON.stringify(d[d.length - 1] || 0) : '';
+const freshNow = new Set();             // in dieser Sitzung schon frisch vom Anbieter geholt (Start: nicht doppelt laden)
 const listSeen = {};                    // Fingerabdruck der zuletzt angezeigten Liste je Abfrage
 function listApi(action) {
   if (listFresh) return api(action).then(d => { writeList(action, d); listSeen[action] = listSig(d); return d; });
   return readList(action).then(hit => {
     if (hit && Array.isArray(hit.data) && hit.data.length) { listSeen[action] = listSig(hit.data); return hit.data; }
-    return api(action).then(d => { writeList(action, d); listSeen[action] = listSig(d); store.set('listsTs', Date.now()); return d; });
+    return api(action).then(d => { writeList(action, d); listSeen[action] = listSig(d); freshNow.add(action); store.set('listsTs', Date.now()); return d; });
   });
 }
 // Im Hintergrund alle Listen neu holen; hat sich etwas geändert, gelten die neuen Daten ab der nächsten Ansicht
@@ -614,13 +615,15 @@ let listRefreshing = false;
 async function refreshLists(reason) {
   if (listRefreshing || !cfg) return;
   listRefreshing = true;
-  let changed = false;
+  let changed = false, ok = 0;
   try {
     for (const k of ['live', 'movie', 'series']) {
       for (const action of CAT[k]) {
+        if (reason === 'start' && freshNow.has(action)) { ok++; continue; }
         try {
           const d = await api(action);
           if (!Array.isArray(d)) continue;
+          ok++;
           await writeList(action, d);
           if (listSeen[action] !== undefined && listSig(d) !== listSeen[action]) {
             changed = true;
@@ -631,6 +634,9 @@ async function refreshLists(reason) {
         } catch (e) {}
       }
     }
+    // nichts erreicht (z. B. WLAN nach dem Einschalten noch nicht da): gleich nochmal versuchen
+    if (!ok) { listRetry(reason); return; }
+    listTries = 0;
     store.set('listsTs', Date.now());
     // neue Inhalte: Startseite gleich neu aufbauen, wenn der Nutzer gerade nichts offen hat
     if (changed && (current === 'home' || current === 'live' || current === 'movie' || current === 'series') && !overlays.length &&
@@ -639,6 +645,13 @@ async function refreshLists(reason) {
       if (!a || a === document.body || a.classList.contains('play')) render(current, currentArg);
     }
   } finally { listRefreshing = false; }
+}
+let listTries = 0, listRetryT = 0;
+function listRetry(reason) {
+  if (listTries >= 8 || reason === 'manual') { listTries = 0; return; }
+  listTries++;
+  clearTimeout(listRetryT);
+  listRetryT = setTimeout(() => refreshLists(reason), Math.min(15e3 * listTries, 60e3));
 }
 function listsMaybeRefresh(reason, maxAge) {
   if (Date.now() - (store.get('listsTs', 0) || 0) > maxAge) refreshLists(reason);
@@ -2524,8 +2537,8 @@ if (cfg) {
   history.replaceState({ name: 'home', id: 0 }, '');
   if (!store.get('setupDone', false)) showSetup(true);
   else { showApp(); render('home', null); }
-  // Listen aus dem Zwischenspeicher? Dann kurz nach dem Start im Hintergrund auf den neuesten Stand bringen
-  setTimeout(() => listsMaybeRefresh('start', 10 * 60e3), 8000);
+  // Bei jedem Start im Hintergrund auf den neuesten Stand bringen (neue Filme, Folgen, Sender)
+  setTimeout(() => refreshLists('start'), 8000);
   // Beim Einschalten ist das WLAN oft noch nicht da: mehrmals versuchen, nur bei abgelehnten
   // Zugangsdaten zur Anmeldung wechseln.
   const startupCheck = attempt => api('').then(d => {
