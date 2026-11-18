@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#141414">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; media-src 'self' https: http: blob:; connect-src 'self' https: http:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data:; media-src 'self' https: http: blob:; connect-src 'self' https: http:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src https://www.youtube-nocookie.com https://www.youtube.com">
 <meta name="referrer" content="no-referrer">
 <title>IPFLIX</title>
 <link rel="icon" href="icon.png">
@@ -68,6 +68,11 @@
   .btn.play { background: #fff; color: #000; }
   .btn.play:hover { background: rgba(255,255,255,.75); }
   .btn.more { background: rgba(109,109,110,.7); color: #fff; }
+  a.btn { text-decoration: none; }
+  .btn.trailer-search { padding-left: 16px; padding-right: 16px; }
+  #trailer { position: fixed; inset: 0; z-index: 60; background: #000; }
+  #trailer iframe { width: 100%; height: 100%; border: 0; }
+  #trailer .hint { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); padding: 6px 14px; border-radius: 6px; font-size: 14px; color: #ccc; pointer-events: none; transition: opacity .6s; }
   .btn.more:hover { background: rgba(109,109,110,.4); }
   .btn.red { background: var(--accent); color: #fff; width: 100%; padding: 14px; }
   .btn.round { width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.6);
@@ -129,6 +134,12 @@
   .card.chan:focus-visible { transform: none; outline: 2px solid rgba(255,255,255,.9); background: rgba(255,255,255,.1); }
   .chan:focus-visible .logo img, .chan:focus-visible .ctext { transform: scale(1.12); }
   .chan:focus-visible .cname { color: #fff; }
+  /* Senderstatus: grün läuft flüssig, gelb hakt, rot gestört */
+  .chan .dot { position: absolute; top: 8px; right: 8px; width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,.55); }
+  .chan .dot:not(.g):not(.y):not(.r):not(.p) { display: none; }
+  .chan .dot.g { background: #46d369; } .chan .dot.y { background: #f5c518; } .chan .dot.r { background: #e50914; }
+  .chan .dot.p { background: transparent; box-shadow: 0 0 0 2px rgba(255,255,255,.55); animation: dotp 1s ease-in-out infinite; }
+  @keyframes dotp { 50% { opacity: .25; } }
   .more-card.chan { display: flex; align-items: center; justify-content: center; color: var(--link); font-size: 14px; }
 
   /* Nächstes Spiel des Lieblingsvereins: normale Reihe mit einer Infozeile */
@@ -225,6 +236,7 @@
   .chips { display: flex; flex-wrap: wrap; gap: 10px; }
   .chip { padding: 9px 18px; border-radius: 999px; border: 2px solid #4d4d4d; background: #232323; cursor: pointer; font-size: 15px; }
   .chip[aria-pressed="true"] { background: #fff; color: #000; border-color: #fff; font-weight: 700; }
+  .chip.static { cursor: default; background: transparent; border-color: transparent; font-weight: 700; min-width: 170px; text-align: center; }
 
   @media (max-width: 760px) {
     nav { flex-wrap: wrap; gap: 8px 18px; padding: 10px 16px; }
@@ -372,6 +384,19 @@
         dann ohne Ruckeln. Beim Umschalten wird das Bild kurz schwarz.</p>
       <div class="chips" id="afrChips"></div>
     </div>
+    <div class="sgroup" id="probeGroup">
+      <h3>Senderstatus (Ampel)</h3>
+      <p class="hint">Punkt am Sender: grün läuft flüssig, gelb hakt manchmal, rot gestört. Bleibt die Auswahl kurz auf einem
+        Sender, prüft die App ihn (und die zwei daneben) 4 Sekunden lang im Hintergrund, aber nur, wenn gerade nichts läuft.</p>
+      <div class="chips" id="probeChips"></div>
+    </div>
+    <div class="sgroup" id="syncGroup">
+      <h3>Ton-Versatz</h3>
+      <p class="hint">Gleicht aus, wenn Ton und Bild minimal auseinander liegen (z. B. durch Soundbar oder Bildverarbeitung des
+        Fernsehers). Der Ton-Test zeigt einen Blitz mit gleichzeitigem Piepton: mit links/rechts in 10-ms-Schritten einstellen,
+        bis beides genau zusammen kommt, dann Zurück.</p>
+      <div class="chips"><button type="button" class="chip" id="syncLess">− 10 ms</button><span class="chip static" id="syncVal">0 ms</span><button type="button" class="chip" id="syncMore">+ 10 ms</button><button type="button" class="chip" id="syncTestBtn">▶ Ton-Test</button></div>
+    </div>
     <div class="sgroup" id="bootGroup">
       <h3>Beim Einschalten starten</h3>
       <p class="hint">Öffnet IPFLIX automatisch, wenn der Stick startet oder der Fernseher eingeschaltet wird.
@@ -444,8 +469,11 @@ window.__player = {
   failover: function (msg) { failover(msg); },
   error: function (msg) { endLive(); toast('Wiedergabe-Fehler: ' + (msg || ''), true); closePlayer(); },
   playing: function () { markPlaying(); },
+  // Ton-Test beendet: eingestellten Versatz übernehmen
+  avOffset: function (ms) { setAvOffsetUi(+ms || 0); toast('Ton-Versatz gespeichert: ' + avText(avOffset) + '.'); },
   // gemessene Stream-Qualität (Auflösung, Bildrate, Datenrate, Hänger) für die Wahl der besten Variante
-  quality: function (json) { try { qRecord(JSON.parse(json)); } catch (e) {} },
+  quality: function (json) { try { const d = JSON.parse(json); qRecord(d); const m = /\/(\d+)\.(?:ts|m3u8)/.exec(decodeURIComponent(d.u || '')); if (m) paintDots(m[1]); } catch (e) {} },
+  probe: function (id, json) { probeResult(id, json); },
   // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
   hidden: function () { endLive(); saveProgress(true); },
   shown: function () {
@@ -532,6 +560,15 @@ function applyLite() {
 applyLite();
 // Bildwiederholrate des Fernsehers an die Sendung anpassen (nur App)
 let afrMode = store.get('afrMode', 'on');
+// Ton-Versatz in ms (positiv = Ton später)
+let avOffset = +store.get('avOffset', 0) || 0;
+const avText = ms => ms > 0 ? `Ton ${ms} ms später` : ms < 0 ? `Ton ${-ms} ms früher` : '0 ms (unverändert)';
+function applyAvOffset() { if (APP && window.NativePlayer.avOffset) { try { window.NativePlayer.avOffset(avOffset); } catch (e) {} } }
+function setAvOffsetUi(ms) {
+  avOffset = Math.max(-500, Math.min(500, Math.round(ms / 10) * 10)); store.set('avOffset', avOffset); applyAvOffset();
+  const v = document.getElementById('syncVal'); if (v) v.textContent = avText(avOffset);
+}
+applyAvOffset();
 function applyAfr() { if (APP && window.NativePlayer.afr) { try { window.NativePlayer.afr(afrMode !== 'off'); } catch (e) {} } }
 applyAfr();
 const first = x => Array.isArray(x) ? x[0] : x;
@@ -874,6 +911,77 @@ function qualityOf(it) {
     .filter(Boolean).join(' · ');
   return { label, rank, measured: true };
 }
+/* ---------- Senderstatus (Ampel) ----------
+   Aus der Erfahrung beim Schauen (Hänger, Ausfälle) und einer kurzen Prüfung im Hintergrund:
+   Bleibt die Auswahl auf einem Sender stehen, öffnet die App den Stream 4 s ohne Bild und misst,
+   wie schnell und gleichmäßig die Daten kommen. Nur wenn nichts läuft, immer nur eine Verbindung. */
+const PROBE_TTL = 30 * 60e3;
+const PROBE = (() => { const o = store.get('probe', {}); return o && typeof o === 'object' ? o : {}; })();
+let probeOn = store.get('probeOn', true) !== false;
+function qErr(id) {
+  const o = QSTAT[id] || (QSTAT[id] = { plays: 0, stalls: 0, secs: 0 });
+  o.err = (o.errTs && Date.now() - o.errTs < 864e5 ? o.err || 0 : 0) + 1; o.errTs = o.ts = Date.now();
+  store.set('qstat', QSTAT); paintDots(id);
+}
+function chanStatus(id) {
+  const h = QSTAT[id], pr = PROBE[id] && Date.now() - PROBE[id].ts < PROBE_TTL ? PROBE[id] : null;
+  const errs = h && h.errTs && Date.now() - h.errTs < 864e5 ? h.err || 0 : 0;
+  const per10 = h && h.secs >= 60 ? h.stalls / (h.secs / 600) : 0;
+  let st = '';
+  if (pr) st = !pr.ok ? 'r' : pr.slow ? 'y' : 'g';
+  if (h && h.secs >= 60) st = st === 'r' ? 'r' : per10 > 3 ? 'r' : per10 > 1 ? 'y' : st || 'g';
+  if (errs >= 2 && !(pr && pr.ok && pr.ts > h.errTs)) st = 'r';
+  else if (errs === 1 && st === 'g' && !(pr && pr.ts > h.errTs)) st = 'y';
+  return st;
+}
+const DOT_TITLE = { g: 'Läuft flüssig', y: 'Hakt manchmal', r: 'Gestört', p: 'Wird geprüft …' };
+function paintDot(dot, id) {
+  const st = probing === String(id) ? 'p' : chanStatus(id);
+  dot.className = 'dot' + (st ? ' ' + st : '');
+  dot.title = DOT_TITLE[st] || '';
+}
+function paintDots(id) { document.querySelectorAll('.chan[data-sid="' + String(id).replace(/"/g, '') + '"] .dot').forEach(d => paintDot(d, id)); }
+let probing = '', probeQueue = [], probeTimer = 0;
+const probeLog = [];                   // Zeitpunkte der letzten Prüfungen (Obergrenze gegen zu viele Verbindungen)
+function probeCan() {
+  return probeOn && APP && window.NativePlayer.probe && !nowPlaying && $('#player').hidden && !document.hidden;
+}
+function probeNext() {
+  if (probing || !probeCan()) return;
+  const now = Date.now();
+  while (probeLog.length && now - probeLog[0] > 10 * 60e3) probeLog.shift();
+  if (probeLog.length >= 40) return;
+  const id = probeQueue.shift();
+  if (!id) return;
+  if (PROBE[id] && now - PROBE[id].ts < PROBE_TTL) { probeNext(); return; }
+  probing = String(id); probeLog.push(now); paintDots(id);
+  try { window.NativePlayer.probe(probing, `${base()}/live/${cred()}/${id}.ts`); } catch (e) { probing = ''; }
+}
+function probeResult(id, json) {
+  let d = {}; try { d = JSON.parse(json); } catch (e) {}
+  probing = '';
+  if (!d.skip) {
+    const ok = d.code >= 200 && d.code < 300 && d.bytes > 50000;
+    // langsam: Start über 2,5 s, Datenlücke über 1,5 s oder kaum Daten
+    PROBE[id] = { ok, slow: ok && (d.ttfb > 2500 || d.gap > 1500 || d.kbps < 400), ttfb: d.ttfb, gap: d.gap, kbps: d.kbps, ts: Date.now() };
+    const ids = Object.keys(PROBE);
+    if (ids.length > 600) ids.sort((a, b) => PROBE[a].ts - PROBE[b].ts).slice(0, 200).forEach(k => delete PROBE[k]);
+    store.set('probe', PROBE);
+  }
+  paintDots(id);
+  setTimeout(probeNext, 300);
+}
+// Auswahl bleibt 1 s auf einem Sender: ihn und die zwei daneben prüfen
+document.addEventListener('focusin', e => {
+  const c = e.target.closest && e.target.closest('.card.chan[data-sid]');
+  clearTimeout(probeTimer);
+  if (!c || !probeCan()) return;
+  probeTimer = setTimeout(() => {
+    const sib = [c, c.nextElementSibling, c.nextElementSibling && c.nextElementSibling.nextElementSibling];
+    probeQueue = sib.filter(x => x && x.dataset && x.dataset.sid).map(x => x.dataset.sid);
+    probeNext();
+  }, 1000);
+});
 const byQuality = items => items.map((it, i) => [it, i]).sort((a, b) => qualityOf(b[0]).rank - qualityOf(a[0]).rank || a[1] - b[1]).map(x => x[0]);
 // Maximale Auflösung: auf schwachen Geräten (z. B. 1080p-Stick) zu hohe Varianten ausblenden.
 let maxRes = store.get('maxRes', 0);   // 0 = Auto, sonst 4=4K, 3=Full HD, 2=HD
@@ -1594,6 +1702,8 @@ function card(it, o = {}, ctx) {
     if (im) logo.append(im);
     // unter dem Logo steht nur die Variante (4K, Full HD, HEVC ...), kein Sendername
     c.append(logo, el('div', 'cname', qualityOf(it).label || '\u00a0'));
+    c.dataset.sid = it.id;
+    const dot = el('span', 'dot'); c.append(dot); paintDot(dot, it.id);
     return c;
   }
   const fb = el('div', 'fallback', it.name);
@@ -1705,6 +1815,48 @@ function hero(it) {
 }
 
 /* ---------- Details ---------- */
+/* ---------- Trailer ----------
+   Den Trailer liefert der Anbieter (youtube_trailer). Er läuft im offiziellen YouTube-Player direkt in der App.
+   Dazu ein Knopf für die YouTube-Suche in der Sprache des Films (deutscher bzw. türkischer Trailer). */
+function ytId(v) {
+  const t = String(v || '').trim();
+  if (/^[\w-]{11}$/.test(t)) return t;
+  const m = /(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/.exec(t);
+  return m ? m[1] : '';
+}
+const filmLang = it => it.lang || itemLang(it.raw) || '';
+function trailerQuery(it, yr) {
+  const lg = filmLang(it);
+  return `${it.name}${yr ? ' ' + yr : ''} ${lg === 'tr' ? 'fragman' : lg === 'de' || !lg ? 'trailer deutsch' : 'trailer'}`;
+}
+function playTrailer(id, it) {
+  const hl = filmLang(it) === 'tr' ? 'tr' : 'de';
+  const box = el('div'); box.id = 'trailer';
+  const f = document.createElement('iframe');
+  f.allow = 'autoplay; encrypted-media; fullscreen';
+  f.referrerPolicy = 'strict-origin-when-cross-origin';
+  f.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&hl=${hl}&cc_lang_pref=${hl}&origin=${encodeURIComponent(location.origin)}`;
+  const hint = el('div', 'hint', 'Zurück beendet den Trailer');
+  box.append(f, hint);
+  document.body.append(box);
+  setTimeout(() => { hint.style.opacity = '0'; }, 4000);
+  const prev = document.activeElement;
+  pushOverlay(() => { box.remove(); if (prev && prev.focus) prev.focus({ preventScroll: true }); });
+  f.focus();
+}
+function addTrailer(acts, it, raw, yr) {
+  if (acts.querySelector('.trailer')) return;
+  const id = ytId(raw);
+  if (id) {
+    const b = button('btn more trailer', '▶  Trailer', () => playTrailer(id, it));
+    acts.insertBefore(b, acts.children[1] || null);
+  }
+  // Suche in der Sprache des Films; öffnet die YouTube-App
+  const a = el('a', 'btn more trailer-search', id ? 'YouTube' : '▶  Trailer auf YouTube');
+  a.href = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(trailerQuery(it, yr));
+  a.target = '_blank'; a.rel = 'noopener';
+  acts.append(a);
+}
 async function showDetails(it) {
   const prev = document.activeElement;
   const wrap = el('div', 'modal-wrap'), m = el('div', 'modal');
@@ -1746,6 +1898,7 @@ async function showDetails(it) {
       plot.textContent = i.plot || i.description || it.plot || '';
       fillMeta(meta, { ...it, year: year(i.releasedate) || it.year, rating: i.rating || it.rating, genre: i.genre, duration: i.duration });
       sideInfo([['Besetzung', i.cast || i.actors], ['Regie', i.director], ['Genres', i.genre]]);
+      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releasedate) || it.year);
     } else {
       eps.append(el('div', 'spinner small'));
       const d = await getSeriesInfo(it.id), i = d.info || {};
@@ -1754,6 +1907,7 @@ async function showDetails(it) {
       const seasons = Object.keys(d.episodes || {}).sort((a, b) => a - b);
       fillMeta(meta, { ...it, year: year(i.releaseDate) || it.year, rating: i.rating || it.rating, genre: i.genre, seasons: seasons.length });
       sideInfo([['Besetzung', i.cast], ['Regie', i.director], ['Genres', i.genre]]);
+      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releaseDate) || it.year);
       renderEpisodes(eps, it, d, seasons);
     }
   } catch (e) {
@@ -2037,6 +2191,7 @@ function playLive(it, list) {
 const matchBest = new Set();   // Sender, die laut Programm gerade das Spiel des Lieblingsvereins zeigen
 function failover(msg) {
   const np = nowPlaying;
+  if (np && np.live) qErr(np.it.id);
   if (!np || !np.live) { window.__player.error(msg); return; }
   const tried = np.tried || new Set([String(np.it.id)]);
   getItems('live').then(all => {
@@ -2316,6 +2471,7 @@ $('#mPrefs').onclick = () => {
   render(current, currentArg);
 };
 /* ---------- Einstellungen (beim ersten Start und über das Menü) ---------- */
+let sProbe = 'on';
 let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto', sAfr = 'on', sBoot = 'off', bootWas = 'off', bootPending = false;
 const BOOT_OPTS = [['on', 'An'], ['off', 'Aus']];
 function bootState() { try { return APP && window.NativePlayer.autostartState ? window.NativePlayer.autostartState() : 'none'; } catch (e) { return 'none'; } }
@@ -2351,6 +2507,11 @@ function showSetup(firstRun) {
   $('#teamRes').textContent = '';
   sLangs = langs.slice(); sRes = maxRes; sLite = liteMode; sAfr = afrMode;
   $('#afrGroup').hidden = !APP;
+  $('#syncGroup').hidden = !(APP && window.NativePlayer.syncTest);
+  $('#probeGroup').hidden = !(APP && window.NativePlayer.probe);
+  sProbe = probeOn ? 'on' : 'off';
+  chipRow('#probeChips', [['on', 'Prüfen'], ['off', 'Nicht prüfen (nur Erfahrung)']], v => v === sProbe, v => { sProbe = v; });
+  $('#syncVal').textContent = avText(avOffset);
   chipRow('#langChips', [['all', 'Alle Sprachen']].concat(LANG_KEYS.map(k => [k, LANGS[k].label])),
     v => v === 'all' ? !sLangs.length : sLangs.indexOf(v) >= 0,
     v => { if (v === 'all') sLangs = []; else sLangs = sLangs.indexOf(v) >= 0 ? sLangs.filter(x => x !== v) : sLangs.concat(v); });
@@ -2389,6 +2550,7 @@ $('#setupForm').onsubmit = e => {
   maxRes = sRes; store.set('maxRes', maxRes);
   liteMode = sLite; store.set('liteMode', liteMode); applyLite();
   afrMode = sAfr; store.set('afrMode', afrMode); applyAfr();
+  probeOn = sProbe === 'on'; store.set('probeOn', probeOn);
   store.set('setupDone', true);
   if (langChanged) { langMiss.clear(); clearCache(); }
   let msg = 'Einstellungen gespeichert.', sticky = false;
@@ -2408,6 +2570,9 @@ $('#setupForm').onsubmit = e => {
   closeSetup();
 };
 $('#mSetup').onclick = () => showSetup(false);
+$('#syncLess').onclick = () => setAvOffsetUi(avOffset - 10);
+$('#syncMore').onclick = () => setAvOffsetUi(avOffset + 10);
+$('#syncTestBtn').onclick = () => { try { window.NativePlayer.syncTest(); } catch (e) {} };
 document.addEventListener('click', e => { if (!e.target.closest('#menu, #avatar')) $('#menu').hidden = true; });
 $('#mSettings').onclick = showLogin;
 $('#mRefresh').onclick = () => {

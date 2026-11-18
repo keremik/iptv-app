@@ -111,6 +111,68 @@ class MainActivity : AppCompatActivity() {
   private lateinit var statusView: TextView
   // Bildwiederholrate an die Sendung anpassen (50 Hz für Fernsehen, 24 Hz für Filme)
   private var afrEnabled = true
+  @Volatile private var syncSink: SyncSink? = null
+  private val syncMeter = SyncMeter { syncSink }
+  private var avOffsetMs = 0
+  private var syncTest = false
+  // ---------- Senderstatus (Ampel) ----------
+  private val probeExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+  @Volatile private var probeConn: HttpURLConnection? = null
+  @Volatile private var playerOpen = false
+  private fun doProbe(target: String): String {
+    val t0 = SystemClock.uptimeMillis()
+    var ttfb = -1L; var bytes = 0L; var maxGap = 0L; var code = 0; var first = 0L; var last = 0L
+    var conn: HttpURLConnection? = null
+    try {
+      if (playerOpen) return "{\"skip\":true}"
+      conn = (URL(target).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 5000; readTimeout = 3000; instanceFollowRedirects = true
+        setRequestProperty("User-Agent", UA)
+      }
+      probeConn = conn
+      code = conn.responseCode
+      if (code in 200..299) {
+        val ins = conn.inputStream
+        val buf = ByteArray(16 * 1024)
+        while (!playerOpen) {
+          val n = ins.read(buf)
+          if (n < 0) break
+          val now = SystemClock.uptimeMillis()
+          if (ttfb < 0) { ttfb = now - t0; first = now } else maxGap = maxOf(maxGap, now - last)
+          last = now; bytes += n
+          if (now - first > 4000 || bytes > 8_000_000) break
+        }
+      }
+    } catch (e: Exception) {
+      if (last > 0) maxGap = maxOf(maxGap, SystemClock.uptimeMillis() - last)
+    } finally {
+      try { conn?.disconnect() } catch (e: Exception) {}
+      probeConn = null
+    }
+    if (playerOpen) return "{\"skip\":true}"
+    val secs = if (last > first) (last - first) / 1000.0 else 0.0
+    val kbps = if (secs > 0.5) (bytes * 8 / 1000.0 / secs).toInt() else 0
+    return "{\"code\":$code,\"ttfb\":$ttfb,\"bytes\":$bytes,\"gap\":$maxGap,\"kbps\":$kbps}"
+  }
+  private fun setAvOffset(ms: Int) { avOffsetMs = ms.coerceIn(-500, 500); syncSink?.offsetUs = avOffsetMs * 1000L }
+  private fun offsetText(ms: Int) = when { ms > 0 -> "Ton $ms ms später"; ms < 0 -> "Ton ${-ms} ms früher"; else -> "Ton unverändert (0 ms)" }
+  private fun startSyncTest() {
+    showPlayer("asset:///synctest.ts", false, "Ton-Test", 0, "")
+    syncTest = true
+    syncMeter.active = true
+    player?.repeatMode = Player.REPEAT_MODE_ONE
+    showSyncInfo()
+    main.postDelayed(syncTick, 3000)
+  }
+  private val syncTick: Runnable = object : Runnable {
+    override fun run() { if (!syncTest) return; showSyncInfo(); main.postDelayed(this, 3000) }
+  }
+  private fun showSyncInfo() {
+    qualityView.visibility = View.VISIBLE
+    qualityView.text = "◀ ▶ 10 ms · ▲ ▼ 50 ms · OK = 0 · Zurück = speichern\n" + (syncMeter.last.ifEmpty { "Messung läuft …" })
+    titleView.text = "Ton-Test: " + offsetText(avOffsetMs)
+    showInfo(0)
+  }
   private var origModeId = 0
   private var modeChanged = false
   private var fpsToken = -1
@@ -211,11 +273,16 @@ class MainActivity : AppCompatActivity() {
         .setExceedRendererCapabilitiesIfNecessary(true))
     }
     // Hardware-Decoder zuerst, bei Problemen automatisch auf einen anderen Decoder ausweichen
-    val renderers = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+    val renderers = object : DefaultRenderersFactory(this) {
+      // Ton-Uhr mit einstellbarem Versatz (Einstellungen → Ton-Versatz)
+      override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink? =
+        super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)?.let { SyncSink(it).also { s -> s.offsetUs = avOffsetMs * 1000L; syncSink = s } }
+    }.setEnableDecoderFallback(true)
     player = ExoPlayer.Builder(this, renderers).setMediaSourceFactory(mediaSourceFactory())
       .setLoadControl(loadControl).setBandwidthMeter(meter).setTrackSelector(selector)
       .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build().also {
       it.addListener(playerListener)
+      it.setVideoFrameMetadataListener(syncMeter)
       // Sauberer Ton-Fokus: bei Anrufen/anderem Ton automatisch pausieren.
       it.setAudioAttributes(
         AudioAttributes.Builder()
@@ -746,6 +813,18 @@ class MainActivity : AppCompatActivity() {
     @JavascriptInterface fun warm(url: String) {
       Thread { try { java.net.InetAddress.getAllByName(URL(url).host) } catch (e: Exception) {} }.start()
     }
+    // Ton-Versatz in ms: positiv = Ton später, negativ = Ton früher
+    @JavascriptInterface fun avOffset(ms: Int) { main.post { setAvOffset(ms) } }
+    // Ton-Test: Testbild mit Blitz und Piepton (exakt gleichzeitig), Versatz mit links/rechts einstellen
+    @JavascriptInterface fun syncTest() { main.post { startSyncTest() } }
+    // Senderstatus ohne Abspielen: Stream kurz öffnen und messen, wie schnell und gleichmäßig Daten kommen
+    @JavascriptInterface fun probe(id: String, url: String) {
+      probeExec.execute {
+        val r = doProbe(url)
+        runJs("window.__player&&__player.probe&&__player.probe(" + jsStr(id) + "," + jsStr(r) + ")")
+      }
+    }
+    @JavascriptInterface fun syncStats(): String = syncMeter.last
     @JavascriptInterface fun afr(on: Boolean) { main.post { afrEnabled = on; if (!on) restoreMode() } }
     // Beim Einschalten starten: "on", "off", oder "perm" (Erlaubnis fehlt noch)
     @JavascriptInterface fun autostartState(): String =
@@ -784,6 +863,11 @@ class MainActivity : AppCompatActivity() {
   private fun showPlayer(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
     val p = player ?: return
     reportQuality(true)
+    endSyncTest()
+    // laufende Senderprüfung sofort beenden: viele Anbieter erlauben nur eine Verbindung
+    playerOpen = true
+    probeConn?.let { c -> Thread { try { c.disconnect() } catch (e: Exception) {} }.start() }
+    p.repeatMode = Player.REPEAT_MODE_OFF
     qUrl = if (live) url else ""; qReady = false; qT0 = 0L; qStalls = 0
     qualityView.text = ""; qualityView.visibility = View.GONE
     playToken++
@@ -981,8 +1065,17 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  private fun endSyncTest() {
+    if (!syncTest) return
+    syncTest = false; syncMeter.active = false
+    main.removeCallbacks(syncTick)
+    player?.repeatMode = Player.REPEAT_MODE_OFF
+    runJs("window.__player&&__player.avOffset&&__player.avOffset($avOffsetMs)")
+  }
   private fun hidePlayer() {
     reportQuality(true)
+    endSyncTest()
+    playerOpen = false
     qUrl = ""
     playToken++
     main.removeCallbacks(endSkip); endSkip.run()
@@ -1030,6 +1123,18 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
       }
       val p = player
+      // Ton-Test: links/rechts verschiebt den Ton in 10-ms-Schritten, hoch/runter in 50 ms
+      if (syncTest) {
+        val step = when (k) { KeyEvent.KEYCODE_DPAD_LEFT -> -10; KeyEvent.KEYCODE_DPAD_RIGHT -> 10; KeyEvent.KEYCODE_DPAD_DOWN -> -50; KeyEvent.KEYCODE_DPAD_UP -> 50; else -> 0 }
+        if (step != 0) {
+          if (down) { setAvOffset(avOffsetMs + step); showSyncInfo() }
+          return true
+        }
+        if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER) {
+          if (!down) { setAvOffset(0); showSyncInfo() }
+          return true
+        }
+      }
       // Leiste sichtbar (auch während sie noch einblendet); "fully visible" ist beim Einblenden noch falsch
       val ctrl = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_controller)?.visibility == View.VISIBLE
       val f = playerView.findFocus()
