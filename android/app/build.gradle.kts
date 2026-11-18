@@ -23,8 +23,8 @@ android {
     applicationId = "com.ipflix.app"
     minSdk = 21
     targetSdk = 34
-    versionCode = 18
-    versionName = "3.4"
+    versionCode = 19
+    versionName = "3.5"
   }
   buildTypes {
     getByName("release") {
