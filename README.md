@@ -36,6 +36,13 @@ Gerät und braucht keinen fremden Server.
   Hänger und verlorene Bilder (Anzeige oben im Player: „Empfangen: 1080p · 50 fps · H.264 · 8,4 Mbit/s“). Die
   Varianten eines Senders werden danach sortiert: zuerst die beste, die flüssig läuft. Ein „4K“ im Namen, das nur
   1080p sendet, wird erkannt; eine Variante, die hakt, rutscht nach unten.
+- **Senderstatus (Ampel):** Punkt am Sender, grün = läuft flüssig, gelb = hakt manchmal, rot = gestört. Aus der Erfahrung
+  beim Schauen und einer kurzen Prüfung im Hintergrund (Auswahl bleibt 1 s auf einem Sender: er und die zwei daneben werden
+  4 s lang ohne Bild geöffnet; nur wenn nichts läuft, nie mehr als eine Verbindung, höchstens 40 Prüfungen in 10 Minuten).
+- **Ton-Versatz und Ton-Test:** Einstellungen → Ton-Versatz. Der Ton-Test zeigt Blitz und Piepton exakt gleichzeitig
+  und die Messung des Players; mit links/rechts in 10-ms-Schritten (hoch/runter 50 ms) nachstellen.
+- **Trailer:** in den Filmdetails, falls der Anbieter einen liefert, im YouTube-Player direkt in der App; dazu die
+  YouTube-Suche in der Sprache des Films („trailer deutsch“ bzw. „fragman“).
 - **Bild:** bis 4K, Hardware-Decoder, Bildwiederholrate passend zur Sendung (50 Hz / 24 Hz, abschaltbar).
 
 ## Aufbau
