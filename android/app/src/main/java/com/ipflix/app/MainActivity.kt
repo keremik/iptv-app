@@ -75,6 +75,17 @@ class MainActivity : AppCompatActivity() {
   private val main = Handler(Looper.getMainLooper())
 
   private var isLive = false
+  // Senderliste im Player (Live): Namen, aktuelle Position, vorheriger Sender
+  private lateinit var chanPanel: LinearLayout
+  private lateinit var chanList: android.widget.ListView
+  private var chanItems = listOf<String>()
+  private var chanHasPrev = false
+  private var chanIdx = 0
+  private var digits = ""
+  private var swallowOkUp = false
+  // nächste Folge: Hinweis mit Countdown in den letzten Sekunden
+  private var nextLabel = ""
+  private lateinit var nextView: TextView
   // Ausfallsicherheit: Adressen dieses Senders (HLS, TS), Wiederholversuche, Hänger-Erkennung
   private var urls = listOf<String>()
   private var urlIdx = 0
@@ -246,6 +257,36 @@ class MainActivity : AppCompatActivity() {
       }
     })
     playerView.setOnTouchListener { _, e -> taps.onTouchEvent(e); false }
+    // Senderliste links (OK im Live-TV), wie bei TiviMate
+    chanPanel = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setBackgroundColor(0xE6101010.toInt())
+      setPadding(dp(12), dp(20), dp(12), dp(20))
+      visibility = View.GONE
+    }
+    chanPanel.addView(TextView(this).apply { text = "Sender"; setTextColor(Color.WHITE); textSize = 20f; setPadding(dp(14), 0, 0, dp(10)) })
+    chanList = android.widget.ListView(this).apply {
+      divider = null
+      setSelector(GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x40FFFFFF) })
+      isFocusable = true
+      setOnItemClickListener { _, _, pos, _ -> pickChannel(pos) }
+      setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(a: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) { bumpChanTimer() }
+        override fun onNothingSelected(a: android.widget.AdapterView<*>?) {}
+      })
+    }
+    chanPanel.addView(chanList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    overlay.addView(chanPanel, FrameLayout.LayoutParams(dp(420), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
+    nextView = TextView(this).apply {
+      setTextColor(Color.BLACK); textSize = 18f
+      setPadding(dp(22), dp(14), dp(22), dp(14))
+      background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(Color.WHITE) }
+      visibility = View.GONE
+    }
+    overlay.addView(nextView, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply {
+      bottomMargin = dp(110); rightMargin = dp(48)
+    })
     root.addView(overlay, matchParent())
     infoBar = bar
     // Titel/Programm nur zusammen mit der Steuerung zeigen (und kurz nach Start oder Senderwechsel)
@@ -607,6 +648,21 @@ class MainActivity : AppCompatActivity() {
     }
     @JavascriptInterface fun afr(on: Boolean) { main.post { afrEnabled = on; if (!on) restoreMode() } }
     @JavascriptInterface fun stop() { main.post { hidePlayer() } }
+    // Senderliste: [[Nummer, Name, Variante], ...], aktuelle Position, Name des vorherigen Senders
+    @JavascriptInterface fun channels(json: String, idx: Int, prev: String) {
+      val items = try {
+        val a = org.json.JSONArray(json)
+        (0 until a.length()).map { i ->
+          val r = a.getJSONArray(i)
+          val num = r.optString(0); val name = r.optString(1); val q = r.optString(2)
+          (if (num.isNotEmpty()) "$num   " else "") + name + (if (q.isNotEmpty()) "   ·  $q" else "")
+        }
+      } catch (e: Exception) { emptyList() }
+      main.post { chanItems = items; chanIdx = maxOf(0, idx); prevName = prev; chanHasPrev = prev.isNotEmpty() }
+    }
+    @JavascriptInterface fun notice(text: String) { main.post { if (overlay.visibility == View.VISIBLE) notice(text, 5000) } }
+    @JavascriptInterface fun next(label: String) { main.post { nextLabel = label } }
+    @JavascriptInterface fun voice(lang: String) { main.post { startVoice(lang) } }
     @JavascriptInterface fun subtitle(text: String) {
       main.post {
         subtitleView.text = text
@@ -641,6 +697,8 @@ class MainActivity : AppCompatActivity() {
     playerView.requestFocus()
     showInfo(6000)
     main.removeCallbacks(watchdog); main.postDelayed(watchdog, 1000)
+    hideChannels(); nextLabel = ""; nextView.visibility = View.GONE
+    main.removeCallbacks(nextTick); main.postDelayed(nextTick, 1000)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     startTimer()
   }
@@ -679,9 +737,72 @@ class MainActivity : AppCompatActivity() {
     main.removeCallbacks(endSkip); main.postDelayed(endSkip, 1300)
   }
 
+  // ---------- Senderliste ----------
+  private val hideChans = Runnable { hideChannels() }
+  private fun bumpChanTimer() { main.removeCallbacks(hideChans); main.postDelayed(hideChans, 20_000) }
+  private fun showChannels() {
+    if (chanItems.isEmpty()) { playerView.showController(); return }
+    val rows = (if (chanHasPrev) listOf("↩  Vorheriger Sender: $prevName") else emptyList()) + chanItems
+    chanList.adapter = object : android.widget.BaseAdapter() {
+      override fun getCount() = rows.size
+      override fun getItem(i: Int) = rows[i]
+      override fun getItemId(i: Int) = i.toLong()
+      override fun getView(i: Int, cv: View?, parent: ViewGroup?): View {
+        val tv = (cv as? TextView) ?: TextView(this@MainActivity).apply {
+          textSize = 17f; setPadding(dp(14), dp(11), dp(14), dp(11)); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        tv.text = rows[i]
+        val cur = i == chanIdx + (if (chanHasPrev) 1 else 0)
+        tv.setTextColor(if (cur) 0xFFE50914.toInt() else Color.WHITE)
+        tv.setTypeface(null, if (cur) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        return tv
+      }
+    }
+    playerView.hideController()
+    chanPanel.visibility = View.VISIBLE
+    chanList.requestFocus()
+    chanList.setSelection(chanIdx + (if (chanHasPrev) 1 else 0))
+    bumpChanTimer()
+  }
+  private fun hideChannels() {
+    main.removeCallbacks(hideChans)
+    if (chanPanel.visibility != View.VISIBLE) return
+    chanPanel.visibility = View.GONE
+    playerView.requestFocus()
+  }
+  private fun pickChannel(pos: Int) {
+    hideChannels()
+    if (chanHasPrev && pos == 0) runJs("window.__player&&__player.prev&&__player.prev()")
+    else runJs("window.__player&&__player.pick&&__player.pick(" + (pos - (if (chanHasPrev) 1 else 0)) + ")")
+  }
+  private var prevName = ""
+  private val digitGo = Runnable {
+    val n = digits; digits = ""
+    if (n.isNotEmpty()) runJs("window.__player&&__player.num&&__player.num($n)")
+  }
+  private val noticeOff = Runnable { showStatus(null) }
+  private fun notice(t: String, ms: Long = 4000) { showStatus(t); main.removeCallbacks(noticeOff); main.postDelayed(noticeOff, ms) }
+
+  // ---------- nächste Folge ----------
+  private val nextTick = object : Runnable {
+    override fun run() {
+      if (overlay.visibility != View.VISIBLE) return
+      val p = player
+      if (p != null && nextLabel.isNotEmpty() && !isLive && p.duration > 0) {
+        val left = (p.duration - p.currentPosition) / 1000
+        if (left in 0..20 && p.playbackState != Player.STATE_ENDED) {
+          nextView.text = "Nächste Folge in $left s  ·  $nextLabel\nOK = jetzt ansehen"
+          nextView.visibility = View.VISIBLE
+        } else nextView.visibility = View.GONE
+      }
+      main.postDelayed(this, 1000)
+    }
+  }
+
   private fun hidePlayer() {
     playToken++
     main.removeCallbacks(endSkip); endSkip.run()
+    hideChannels(); nextView.visibility = View.GONE; nextLabel = ""; main.removeCallbacks(nextTick)
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     main.removeCallbacks(watchdog); showStatus(null)
     // Bildrate erst nach einer Minute ohne Wiedergabe zurückstellen: beim Umschalten kein erneutes Schwarzbild
@@ -731,6 +852,26 @@ class MainActivity : AppCompatActivity() {
       val skipping = skipActive && !isLive && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)
       val inButtons = ctrl && f != null && f !== playerView && !skipping     // Nutzer bewegt sich in den Knöpfen (z. B. Zahnrad für Tonspur)
       val first = down && event.repeatCount == 0
+      if (DEBUG_LOG) android.util.Log.d("IPFLIX", "key=$k down=$down list=${chanPanel.visibility} focus=${window.currentFocus?.javaClass?.simpleName} ctrl=$ctrl inButtons=$inButtons")
+      // Senderliste offen: Android bewegt die Auswahl; Zurück/links schließt sie
+      if (chanPanel.visibility == View.VISIBLE) {
+        if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_DPAD_LEFT) { if (first) hideChannels(); return true }
+        // das Loslassen der OK-Taste, die die Liste geöffnet hat, darf keinen Sender auswählen
+        val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER
+        if (okKey && swallowOkUp) { if (!down) swallowOkUp = false; return true }
+        bumpChanTimer()
+        return super.dispatchKeyEvent(event)
+      }
+      // Sendernummer eintippen (Fernbedienungen mit Zifferntasten)
+      if (isLive && k >= KeyEvent.KEYCODE_0 && k <= KeyEvent.KEYCODE_9) {
+        if (first && digits.length < 4) {
+          digits += (k - KeyEvent.KEYCODE_0).toString()
+          notice("Sender $digits", 1800)
+          main.removeCallbacks(digitGo); main.postDelayed(digitGo, 1500)
+        }
+        return true
+      }
+      if (isLive && k == KeyEvent.KEYCODE_LAST_CHANNEL) { if (first) runJs("window.__player&&__player.prev&&__player.prev()"); return true }
       if (k == KeyEvent.KEYCODE_BACK) {
         if (first) {
           if (inButtons) { playerView.hideController(); playerView.requestFocus() }   // PlayerView selbst, nicht ein Knopf
@@ -780,9 +921,14 @@ class MainActivity : AppCompatActivity() {
         KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (first) { p?.pause(); playerView.showController() }; return true }
       }
       if (isOk) {
-        // OK: Pause/Weiter (Live beim ersten Druck nur die Leiste zeigen)
+        // Countdown "Nächste Folge" sichtbar: OK startet sie sofort
+        if (first && nextView.visibility == View.VISIBLE && k != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+          nextView.visibility = View.GONE; nextLabel = ""
+          runJs("window.__player&&__player.next&&__player.next()"); return true
+        }
+        // OK: Live = Senderliste öffnen; Filme = Pause/Weiter
         if (first && p != null) {
-          if (isLive && !ctrl && k != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) playerView.showController()
+          if (isLive && !ctrl && k != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) { swallowOkUp = true; showChannels() }
           else { if (p.isPlaying || (p.playWhenReady && p.playbackState == Player.STATE_BUFFERING)) p.pause() else p.play(); playerView.showController() }
         }
         return true
@@ -826,6 +972,26 @@ class MainActivity : AppCompatActivity() {
     if (p != null && isLive && overlay.visibility == View.VISIBLE) reload()
   }
 
+  // ---------- Sprachsuche ----------
+  private fun startVoice(lang: String) {
+    val tag = when (lang) { "tr" -> "tr-TR"; "en" -> "en-US"; "fr" -> "fr-FR"; "es" -> "es-ES"; "it" -> "it-IT"; "pl" -> "pl-PL"
+                             "nl" -> "nl-NL"; "pt" -> "pt-PT"; "ru" -> "ru-RU"; "ar" -> "ar-SA"; else -> "de-DE" }
+    val i = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+      putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+      putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, tag)
+      putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Film, Serie oder Sender sagen")
+    }
+    try { @Suppress("DEPRECATION") startActivityForResult(i, VOICE_REQ) }
+    catch (e: Exception) { runJs("window.toast&&toast('Sprachsuche ist auf diesem Gerät nicht verfügbar. Tipp: das Mikrofon auf der Bildschirmtastatur nutzen.',true)") }
+  }
+  @Deprecated("startActivityForResult")
+  override fun onActivityResult(req: Int, res: Int, data: Intent?) {
+    @Suppress("DEPRECATION") super.onActivityResult(req, res, data)
+    if (req != VOICE_REQ || res != RESULT_OK) return
+    val text = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
+    runJs("window.__player&&__player.voice&&__player.voice(" + jsStr(text) + ")")
+  }
+
   override fun onDestroy() {
     main.removeCallbacksAndMessages(null)
     player?.release(); player = null
@@ -835,6 +1001,7 @@ class MainActivity : AppCompatActivity() {
 
   companion object {
     const val UA = "IPTVSmartersPro"
+    const val VOICE_REQ = 42
     const val LIVE_START_US = 2_500_000L
     const val LIVE_REBUFFER_US = 4_000_000L
     const val DEBUG_LOG = false

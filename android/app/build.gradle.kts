@@ -5,27 +5,33 @@ plugins {
 android {
   namespace = "com.ipflix.app"
   compileSdk = 34
+  // Signatur-Schlüssel liegt nur verschlüsselt im Repo (ipflix-release.jks.enc). build-release.sh entschlüsselt ihn
+  // mit dem privaten Passwort (Umgebungsvariable IPFLIX_KEY_PASS) nur für die Dauer des Baus.
+  val keyPass: String? = System.getenv("IPFLIX_KEY_PASS")
+  val keyFile = file("ipflix-private.jks")
   signingConfigs {
     create("release") {
-      storeFile = file("ipflix-release.jks")
-      storePassword = "ipflixapp"
-      keyAlias = "ipflix"
-      keyPassword = "ipflixapp"
+      if (keyPass != null && keyFile.exists()) {
+        storeFile = keyFile
+        storePassword = keyPass
+        keyAlias = "ipflix"
+        keyPassword = keyPass
+      }
     }
   }
   defaultConfig {
     applicationId = "com.ipflix.app"
     minSdk = 21
     targetSdk = 34
-    versionCode = 13
-    versionName = "2.2"
+    versionCode = 14
+    versionName = "3.0"
   }
   buildTypes {
     getByName("release") {
       isMinifyEnabled = false
       signingConfig = signingConfigs.getByName("release")
     }
-    getByName("debug") { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("release") }
+    getByName("debug") { isMinifyEnabled = false }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -45,17 +51,13 @@ dependencies {
 // Oberfläche und Daten aus dem Hauptprojekt vor jedem Bau in die App kopieren,
 // damit App und Webseite immer denselben Stand haben.
 tasks.register<Copy>("syncWeb") {
-  from(rootProject.file("../index.html"))
-  from(rootProject.file("../broadcast.json"))
-  from(rootProject.file("../icon.png"))
+  from(rootProject.file("../app-ui/index.html"))
+  from(rootProject.file("../app-ui/broadcast.json"))
+  from(rootProject.file("../app-ui/icon.png"))
   into(layout.projectDirectory.dir("src/main/assets/web"))
-  // Allgemeine App: keine persoenliche Proxy-Adresse in der App-Version
-  filesMatching("index.html") {
-    filter { line -> line.replace("https://iptv-proxy.keremirmak02.workers.dev", "") }
-  }
 }
 tasks.register<Copy>("syncWebLib") {
-  from(rootProject.file("../lib"))
+  from(rootProject.file("../app-ui/lib"))
   into(layout.projectDirectory.dir("src/main/assets/web/lib"))
 }
 tasks.named("preBuild") { dependsOn("syncWeb", "syncWebLib") }
