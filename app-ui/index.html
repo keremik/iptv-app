@@ -372,6 +372,13 @@
         dann ohne Ruckeln. Beim Umschalten wird das Bild kurz schwarz.</p>
       <div class="chips" id="afrChips"></div>
     </div>
+    <div class="sgroup" id="bootGroup">
+      <h3>Beim Einschalten starten</h3>
+      <p class="hint">Öffnet IPFLIX automatisch, wenn der Stick startet oder der Fernseher eingeschaltet wird.
+        Android fragt dafür einmal nach der Erlaubnis „Über anderen Apps einblenden“.</p>
+      <div class="chips" id="bootChips"></div>
+      <p class="hint" id="bootHint" hidden></p>
+    </div>
     <button class="btn red" type="submit">Fertig</button>
   </form>
 </section>
@@ -440,6 +447,7 @@ window.__player = {
   // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
   hidden: function () { endLive(); saveProgress(true); },
   shown: function () {
+    if (bootPending && bootState() === 'on') { bootPending = false; toast('IPFLIX startet jetzt beim Einschalten.'); if (!$('#setup').hidden) { $('#bootHint').hidden = true; bootWas = 'on'; } }
     listsMaybeRefresh('resume', 2 * 3600e3); if (nowPlaying && nowPlaying.live && !liveSession) liveSession = { it: nowPlaying.it, start: 0 }; },
   switch: function (step) { switchChannel(+step); },
   // Senderliste im Player: Eintrag gewählt / vorheriger Sender / Sendernummer eingetippt
@@ -2251,7 +2259,10 @@ $('#mPrefs').onclick = () => {
   render(current, currentArg);
 };
 /* ---------- Einstellungen (beim ersten Start und über das Menü) ---------- */
-let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto', sAfr = 'on';
+let setupFirst = false, sLangs = [], sRes = 0, sLite = 'auto', sAfr = 'on', sBoot = 'off', bootWas = 'off', bootPending = false;
+const BOOT_OPTS = [['on', 'An'], ['off', 'Aus']];
+function bootState() { try { return APP && window.NativePlayer.autostartState ? window.NativePlayer.autostartState() : 'none'; } catch (e) { return 'none'; } }
+const BOOT_MANUAL = 'Bitte am Stick erlauben: Einstellungen → Apps → Spezieller App-Zugriff → Über anderen Apps einblenden → IPFLIX → an.';
 const AFR_OPTS = [['on', 'Anpassen (flüssiger)'], ['off', 'Nicht ändern']];
 const RES_OPTS = [[0, 'Automatisch'], [4, '4K'], [3, 'Full HD'], [2, 'HD']];
 const LITE_OPTS = [['auto', 'Automatisch'], ['on', 'Sparmodus an'], ['off', 'Volle Effekte']];
@@ -2289,6 +2300,12 @@ function showSetup(firstRun) {
   chipRow('#resChips', RES_OPTS, v => +v === sRes, v => { sRes = +v; });
   chipRow('#liteChips', LITE_OPTS, v => v === sLite, v => { sLite = v; });
   chipRow('#afrChips', AFR_OPTS, v => v === sAfr, v => { sAfr = v; });
+  const bs = bootState();
+  $('#bootGroup').hidden = bs === 'none';
+  bootWas = bs; sBoot = bs === 'off' || bs === 'none' ? 'off' : 'on';
+  $('#bootHint').hidden = bs !== 'perm';
+  $('#bootHint').textContent = bs === 'perm' ? 'Die Erlaubnis fehlt noch. ' + BOOT_MANUAL : '';
+  chipRow('#bootChips', BOOT_OPTS, v => v === sBoot, v => { sBoot = v; });
   syncChips();
   $('#teamIn').focus();
 }
@@ -2317,7 +2334,20 @@ $('#setupForm').onsubmit = e => {
   afrMode = sAfr; store.set('afrMode', afrMode); applyAfr();
   store.set('setupDone', true);
   if (langChanged) { langMiss.clear(); clearCache(); }
-  toast('Einstellungen gespeichert.');
+  let msg = 'Einstellungen gespeichert.', sticky = false;
+  if (bootWas !== 'none' && (sBoot === 'on') !== (bootWas !== 'off')) {
+    let r = 'off';
+    try { r = window.NativePlayer.autostart(sBoot === 'on'); } catch (e) {}
+    bootPending = r === 'perm' || r === 'manual';
+    if (r === 'on') msg = 'IPFLIX startet jetzt beim Einschalten.';
+    else if (r === 'perm') msg = 'Fast fertig: Bitte bei IPFLIX „Über anderen Apps einblenden“ erlauben, dann mit Zurück hierher.';
+    else if (r === 'manual') { msg = BOOT_MANUAL; sticky = true; }
+    else if (r === 'off') msg = 'Autostart ist aus.';
+  } else if (sBoot === 'on' && bootWas === 'perm') {
+    bootPending = true;
+    try { if (window.NativePlayer.autostart(true) === 'manual') { msg = BOOT_MANUAL; sticky = true; } } catch (e) {}
+  }
+  toast(msg, sticky);
   closeSetup();
 };
 $('#mSetup').onclick = () => showSetup(false);

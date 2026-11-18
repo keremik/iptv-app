@@ -161,6 +161,19 @@ class MainActivity : AppCompatActivity() {
         }
         return assetLoader.shouldInterceptRequest(url)
       }
+
+      // Beendet Android die Oberfläche (z. B. Speicher knapp), nicht die ganze App abstürzen lassen,
+      // sondern die Oberfläche neu aufbauen.
+      override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+        android.util.Log.w("IPFLIX", "Oberfläche beendet (crash=${detail.didCrash()}), baue neu auf")
+        try { root.removeView(view); view.destroy() } catch (e: Exception) {}
+        // stürzt sie sofort wieder ab, nicht endlos neu starten
+        val now = SystemClock.elapsedRealtime()
+        val again = now - lastUiGone < 20000
+        lastUiGone = now
+        main.post { if (again) finish() else recreate() }
+        return true
+      }
     }
     webView.webChromeClient = WebChromeClient()
     webView.setBackgroundColor(Color.BLACK)
@@ -495,7 +508,7 @@ class MainActivity : AppCompatActivity() {
   private fun watchNetwork() {
     try {
       val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-      cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+      val cb = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
           main.post {
             val p = player ?: return@post
@@ -505,9 +518,12 @@ class MainActivity : AppCompatActivity() {
             }
           }
         }
-      })
+      }
+      cm.registerDefaultNetworkCallback(cb)
+      netCallback = cb
     } catch (e: Exception) {}
   }
+  private var netCallback: ConnectivityManager.NetworkCallback? = null
 
   // ---------- Bildwiederholrate (ruckelfreie Bewegungen, z. B. Fußball mit 50 Bildern/s) ----------
   private fun measureFps() {
@@ -676,6 +692,15 @@ class MainActivity : AppCompatActivity() {
       Thread { try { java.net.InetAddress.getAllByName(URL(url).host) } catch (e: Exception) {} }.start()
     }
     @JavascriptInterface fun afr(on: Boolean) { main.post { afrEnabled = on; if (!on) restoreMode() } }
+    // Beim Einschalten starten: "on", "off", oder "perm" (Erlaubnis fehlt noch)
+    @JavascriptInterface fun autostartState(): String =
+      if (!AutoStart.enabled(this@MainActivity)) "off" else if (AutoStart.allowed(this@MainActivity)) "on" else "perm"
+    @JavascriptInterface fun autostart(on: Boolean): String {
+      AutoStart.set(this@MainActivity, on)
+      if (!on) return "off"
+      if (AutoStart.allowed(this@MainActivity)) return "on"
+      return if (openOverlaySettings()) "perm" else "manual"
+    }
     @JavascriptInterface fun stop() { main.post { hidePlayer() } }
     // Senderliste: [[Nummer, Name, Variante], ...], aktuelle Position, Name des vorherigen Senders
     @JavascriptInterface fun channels(json: String, idx: Int, prev: String) {
@@ -1104,10 +1129,28 @@ class MainActivity : AppCompatActivity() {
   }
   override fun onResume() {
     super.onResume()
+    AutoStart.startWatcher(this)
     runJs("window.__player&&__player.shown&&__player.shown()")
     val p = player
     // Live nach der Rückkehr frisch verbinden (die alte Verbindung ist oft schon weg)
     if (p != null && isLive && overlay.visibility == View.VISIBLE) reload()
+  }
+
+  // Einstellungsseite „Über anderen Apps einblenden“ für IPFLIX öffnen (nötig für den Autostart)
+  private fun openOverlaySettings(): Boolean {
+    if (android.os.Build.VERSION.SDK_INT < 23) return true
+    val uri = android.net.Uri.parse("package:$packageName")
+    val tries = listOf(
+      Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri),
+      Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION),
+      Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+    for (i in tries) {
+      try {
+        if (i.resolveActivity(packageManager) == null) continue
+        startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true
+      } catch (e: Exception) {}
+    }
+    return false
   }
 
   // ---------- Sprachsuche ----------
@@ -1133,7 +1176,9 @@ class MainActivity : AppCompatActivity() {
   override fun onDestroy() {
     main.removeCallbacksAndMessages(null)
     player?.release(); player = null
-    webView.destroy()
+    try { webView.destroy() } catch (e: Exception) {}
+    netCallback?.let { try { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) } catch (e: Exception) {} }
+    netCallback = null
     super.onDestroy()
   }
 
@@ -1143,6 +1188,7 @@ class MainActivity : AppCompatActivity() {
     const val LIVE_START_US = 2_500_000L
     const val LIVE_REBUFFER_US = 4_000_000L
     const val DEBUG_LOG = false
+    private var lastUiGone = -100000L
   }
 
   private fun matchParent() = FrameLayout.LayoutParams(
