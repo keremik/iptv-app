@@ -444,6 +444,8 @@ window.__player = {
   failover: function (msg) { failover(msg); },
   error: function (msg) { endLive(); toast('Wiedergabe-Fehler: ' + (msg || ''), true); closePlayer(); },
   playing: function () { markPlaying(); },
+  // gemessene Stream-Qualität (Auflösung, Bildrate, Datenrate, Hänger) für die Wahl der besten Variante
+  quality: function (json) { try { qRecord(JSON.parse(json)); } catch (e) {} },
   // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
   hidden: function () { endLive(); saveProgress(true); },
   shown: function () {
@@ -468,7 +470,7 @@ function sendChannels() {
   const np = nowPlaying;
   if (!APP || !np || !np.live || !window.NativePlayer.channels) return;
   try {
-    window.NativePlayer.channels(JSON.stringify(np.list.slice(0, 500).map(x => [x.num ? String(x.num) : '', x.name, quality(x.raw || x.name).label])),
+    window.NativePlayer.channels(JSON.stringify(np.list.slice(0, 500).map(x => [x.num ? String(x.num) : '', x.name, qualityOf(x).label])),
                                  np.idx, prevLive ? prevLive.it.name : '');
   } catch (e) {}
 }
@@ -705,6 +707,7 @@ const KEEP_UPPER = new Set(['HEVC', 'H265', 'H264', 'UEFA', 'NFL', 'NBA', 'WWE',
 function prettyCat(name) {
   const raw = String(name || '');
   let t = raw.replace(LANG_PREFIX, '').replace(CHAN_SPACE, '').replace(/^[\s|:★•\-]+|[\s|:★•\-]+$/g, '').trim() || raw;
+  t = t.replace(/\s*\|+\s*/g, ' ');   // "AMZ| Deutschland" -> "AMZ Deutschland"
   if (t === t.toUpperCase()) {
     t = t.replace(/[^\s\/|&+\-]+/g, w => w.length <= 3 || /\d/.test(w) || KEEP_UPPER.has(w) ? w : w.charAt(0) + w.slice(1).replace(/İ/g, 'i').toLowerCase());
   }
@@ -776,13 +779,15 @@ const itemLang = raw => LANG_KEYS.filter(k => LANGS[k].rePre.test(String(raw || 
 let langs = store.get('langs', null);
 if (!Array.isArray(langs)) langs = cfg && store.get('langOnly', true) !== false ? ['de', 'tr'] : [];
 langs = langs.filter(k => LANGS[k]);
+// Kürzel, die in "[DE]", "|TR|", "(4K)" usw. vor Namen weg dürfen (alle Sprachen + Qualität)
+const BRACKET_CODES = [...new Set([].concat(...Object.values(LANGS).map(l => l.codes)).concat(['VIP', 'HD', 'FHD', 'UHD', 'SD', '4K', 'RAW', 'HEVC', 'EU', 'INT', 'MULTI']))].join('|');
 function setLangs(list) {
   langs = list.filter(k => LANGS[k]);
   store.set('langs', langs);
   const codes = { DE: 1, GER: 1, TR: 1, TUR: 1, AT: 1, EN: 1, FR: 1 };
   langs.forEach(k => LANGS[k].codes.forEach(c => { codes[c] = 1; }));
   const all = Object.keys(codes).join('|');
-  LANG_PREFIX = new RegExp(`^\\s*(?:[\\[(|]+\\s*[A-Za-z]{2,4}\\s*[-:]?\\s*[\\])|]+|(?:${all})\\s*[-:|★•]+)\\s*`);
+  LANG_PREFIX = new RegExp(`^\\s*(?:[\\[(|]+\\s*(?:${BRACKET_CODES})\\s*[-:]?\\s*[\\])|]+|(?:${all})\\s*[-:|★•]+)\\s*`, 'i');
   const sp = Object.keys(codes).filter(c => SPACE_SAFE.has(c)).join('|');
   CHAN_SPACE = new RegExp(`^(?:${sp})\\s+(?=\\S)`);
   // bevorzugte Tonspur im nativen Player (z. B. Deutsch vor Türkisch)
@@ -836,12 +841,45 @@ function quality(raw) {
   if (has('backup', 'yedek')) extra.push('Ersatz');
   return { label: [res[0]].concat(extra).filter(Boolean).join(' · '), rank: res[1] - (has('backup', 'yedek') ? 0.4 : 0) };
 }
-const byQuality = items => items.map((it, i) => [it, i]).sort((a, b) => quality(b[0].raw).rank - quality(a[0].raw).rank || a[1] - b[1]).map(x => x[0]);
+// Gemessene Qualität je Sender-Variante (misst der Player beim Schauen): echte Auflösung, Bildrate,
+// Datenrate und Hänger. Gemessenes zählt vor dem Namen ("4K" im Namen, aber nur 1080p gesendet).
+const QSTAT = (() => { const o = store.get('qstat', {}); return o && typeof o === 'object' ? o : {}; })();
+function qRecord(d) {
+  const m = /\/(\d+)\.(?:ts|m3u8)(?:[?&]|$)/.exec(decodeURIComponent(String(d.u || '')));
+  if (!m) return;
+  const id = m[1], o = QSTAT[id] || { plays: 0, stalls: 0, secs: 0 };
+  if (d.h > 0) { o.h = d.h; o.w = d.w; }
+  if (d.fps > 0) o.fps = d.fps;
+  if (d.kbps > 0) o.kbps = o.kbps ? Math.round(o.kbps * 0.6 + d.kbps * 0.4) : d.kbps;
+  if (d.codec) o.codec = d.codec;
+  if (d.final) {
+    // ältere Erfahrungen zählen weniger: ein Sender, der früher hakte, bekommt wieder eine Chance
+    o.stalls = o.stalls * 0.7 + (d.stalls || 0) + (d.dropped || 0) / 50;   // 50 verlorene Bilder zählen wie ein Hänger
+    o.secs = o.secs * 0.7 + (d.secs || 0); o.plays++;
+  }
+  o.ts = Date.now(); QSTAT[id] = o;
+  const ids = Object.keys(QSTAT);
+  if (ids.length > 1500) ids.sort((a, b) => QSTAT[a].ts - QSTAT[b].ts).slice(0, ids.length - 1200).forEach(k => delete QSTAT[k]);
+  store.set('qstat', QSTAT);
+}
+const qShaky = s => s.secs >= 60 && s.stalls / (s.secs / 600) > 1;   // mehr als ein Hänger je 10 Minuten
+function qualityOf(it) {
+  const q = quality(it.raw || it.name), s = QSTAT[it.id];
+  if (!s || !(s.h > 0)) return q;
+  const res = s.h >= 2000 ? 4 : s.h >= 1000 ? 3 : s.h >= 700 ? 2 : 1;
+  // flüssig geht vor: eine Variante mit Hängern rutscht unter die nächstschlechtere Stufe
+  const eff = (s.kbps || 0) * (s.codec === 'HEVC' ? 1.8 : 1);   // HEVC braucht für dasselbe Bild etwa die halbe Datenrate
+  const rank = res + Math.min(eff / 40000, 0.25) + (s.fps >= 45 ? 0.1 : 0) - (qShaky(s) ? 1.5 : 0);
+  const label = [['SD', 'SD', 'HD', 'Full HD', '4K'][res], s.fps >= 45 ? '50 fps' : '', s.codec === 'HEVC' ? 'HEVC' : '', qShaky(s) ? 'hakt' : '']
+    .filter(Boolean).join(' · ');
+  return { label, rank, measured: true };
+}
+const byQuality = items => items.map((it, i) => [it, i]).sort((a, b) => qualityOf(b[0]).rank - qualityOf(a[0]).rank || a[1] - b[1]).map(x => x[0]);
 // Maximale Auflösung: auf schwachen Geräten (z. B. 1080p-Stick) zu hohe Varianten ausblenden.
 let maxRes = store.get('maxRes', 0);   // 0 = Auto, sonst 4=4K, 3=Full HD, 2=HD
 function capVariants(list) {
   if (!maxRes) return list;
-  const ok = list.filter(it => quality(it.raw || it.name).rank <= maxRes + 0.5);
+  const ok = list.filter(it => qualityOf(it).rank <= maxRes + 0.5);
   return ok.length ? ok : list;        // nie eine Gruppe ganz leeren
 }
 
@@ -855,6 +893,9 @@ function popRank(it) {
 // Art einer Live-Kategorie: Sprache (aus dem Namen, sonst aus den Sendern), Sport, allgemein
 const SPORT_RE = /\b(sport|sports|spor|bein|dazn|eurosport|futbol|fussball|fu[sß]ball|bundesliga|s ?sport|tivibu ?spor|exxen ?spor|smart ?spor|tabii ?spor|nba|nfl|ufc|uefa|f1|formel)\b/;
 const GENERAL_RE = /\b(ulusal|genel|general|allgemein|national|vollprogramm|ana kanal|haupt|basic|deutschland|germany|almanya|turkiye|turkey|t[uü]rkiye|osterreich|austria|schweiz)\b/;
+const GENERAL_WORD = new RegExp('^' + GENERAL_RE.source.replace(/^\\b|\\b$/g, '') + '$');
+// Füllwörter, die eine Kategorie nicht zum Thema machen ("TR Ulusal Kanallar", "Deutsche Sender")
+const LANG_CODE_WORD = new Set(['de', 'ger', 'deu', 'at', 'ch', 'tr', 'tur', 'dach', 'ana', 'kanal', 'kanallar', 'kanallari', 'kanali', 'sender', 'tv', 'channels', 'kanaele', 'kanale', 'programm', 'programme', 'deutsche', 'deutsch', 'turk', 'turkce', 'tuerk', 'und', 've', 'alle', 'all', 'tum']);
 const QUALITY_ONLY = /^(hd|fhd|uhd|4k|sd|hevc|h265|vip|raw|50fps|60fps|backup|yedek|[\s|\-:·•★]+)*$/;
 function catKind(name, items) {
   const raw = String(name || '');
@@ -865,7 +906,10 @@ function catKind(name, items) {
     lang = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || '';
   }
   const sport = SPORT_RE.test(f);
-  const general = !sport && (GENERAL_RE.test(f) || QUALITY_ONLY.test(rest.replace(/[^a-z0-9]+/g, ' ').trim()) || !rest.replace(/[^a-z0-9]/g, ''));
+  // allgemein nur, wenn nach Land-, Sprach- und Qualitätswörtern nichts übrig bleibt:
+  // "TR Ulusal", "Deutschland HD" ja, "AMZ Deutschland" oder "Deutschland Kinder" nein (Themen-Kategorie)
+  const left = rest.replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w && !/^\d+$/.test(w) && !GENERAL_WORD.test(w) && !QUALITY_ONLY.test(w) && !LANG_CODE_WORD.has(w)).join(' ');
+  const general = !sport && !left;
   return { lang, sport, general };
 }
 const byPopularity = items => items.map((it, i) => [it, i]).sort((a, b) => popRank(a[0]) - popRank(b[0]) || a[1] - b[1]).map(x => x[0]);
@@ -1307,7 +1351,7 @@ async function matchChannels(m, live, all) {
   const best = main.concat(epgMain.filter(it => main.indexOf(it) < 0));
   const seen = new Set(best.map(it => it.id)), others = [];
   named.concat(likely).forEach(it => { if (!seen.has(it.id) && others.length < 24) { seen.add(it.id); others.push(it); } });
-  const note = it => [epgTimes[it.id] ? 'Im Programm ' + fmtClock(epgTimes[it.id]) : '', quality(it.raw).label].filter(Boolean).join(' · ');
+  const note = it => [epgTimes[it.id] ? 'Im Programm ' + fmtClock(epgTimes[it.id]) : '', qualityOf(it).label].filter(Boolean).join(' · ');
   return { info, best, others, note, epg: hits.length > 0 };
 }
 
@@ -1549,7 +1593,7 @@ function card(it, o = {}, ctx) {
     const im = channelLogo(it, noLogo);
     if (im) logo.append(im);
     // unter dem Logo steht nur die Variante (4K, Full HD, HEVC ...), kein Sendername
-    c.append(logo, el('div', 'cname', quality(it.raw || it.name).label || '\u00a0'));
+    c.append(logo, el('div', 'cname', qualityOf(it).label || '\u00a0'));
     return c;
   }
   const fb = el('div', 'fallback', it.name);
@@ -2005,7 +2049,7 @@ function failover(msg) {
     tried.add(String(next.id));
     const list = np.list.slice();
     if (list.indexOf(next) < 0) list[np.idx >= 0 ? np.idx : 0] = next;
-    const lbl = quality(next.raw || next.name).label;
+    const lbl = qualityOf(next).label;
     pnote(next.name === np.it.name ? `${np.it.name} ist gestört. Weiter auf einer anderen Variante${lbl ? ' (' + lbl + ')' : ''}.`
                                    : `${np.it.name} ist gestört. Weiter auf ${next.name}.`);
     playLive(next, list);
