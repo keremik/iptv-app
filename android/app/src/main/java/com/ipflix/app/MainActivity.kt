@@ -83,6 +83,11 @@ class MainActivity : AppCompatActivity() {
   private var chanIdx = 0
   private var digits = ""
   private var swallowOkUp = false
+  // eigenes Menü für Untertitel/Tonspur (das Menü des Players blieb hängen, wenn sich die Leiste ausblendete)
+  private lateinit var trackPanel: LinearLayout
+  private lateinit var trackTitle: TextView
+  private lateinit var trackList: android.widget.ListView
+  private var trackActions = listOf<() -> Unit>()
   // nächste Folge: Hinweis mit Countdown in den letzten Sekunden
   private var nextLabel = ""
   private lateinit var nextView: TextView
@@ -197,6 +202,9 @@ class MainActivity : AppCompatActivity() {
           .setUsage(C.USAGE_MEDIA).build(),
         true)
       it.setHandleAudioBecomingNoisy(true)
+      // Untertitel nie automatisch (auch nicht, wenn die Datei sie als "Standard" markiert); erzwungene bleiben
+      it.trackSelectionParameters = it.trackSelectionParameters.buildUpon()
+        .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()
       // WLAN-Energiesparen während der Wiedergabe aus (sonst Datenlücken = Hänger), Gerät bleibt wach
       it.setWakeMode(C.WAKE_MODE_NETWORK)
     }
@@ -206,6 +214,7 @@ class MainActivity : AppCompatActivity() {
       controllerShowTimeoutMs = 5000
       resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
       setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+      setShowSubtitleButton(true)          // Untertitel-Knopf (CC): an/aus und Sprache wählen
       setBackgroundColor(Color.BLACK)
       isFocusable = true
       isFocusableInTouchMode = true
@@ -277,6 +286,22 @@ class MainActivity : AppCompatActivity() {
     }
     chanPanel.addView(chanList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     overlay.addView(chanPanel, FrameLayout.LayoutParams(dp(420), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
+    trackPanel = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setBackgroundColor(0xE6101010.toInt())
+      setPadding(dp(12), dp(20), dp(12), dp(20))
+      visibility = View.GONE
+    }
+    trackTitle = TextView(this).apply { setTextColor(Color.WHITE); textSize = 20f; setPadding(dp(14), 0, 0, dp(10)) }
+    trackPanel.addView(trackTitle)
+    trackList = android.widget.ListView(this).apply {
+      divider = null
+      setSelector(GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(0x40FFFFFF) })
+      isFocusable = true
+      setOnItemClickListener { _, _, pos, _ -> val a = trackActions.getOrNull(pos); hideTracks(); a?.invoke() }
+    }
+    trackPanel.addView(trackList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    overlay.addView(trackPanel, FrameLayout.LayoutParams(dp(380), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
     nextView = TextView(this).apply {
       setTextColor(Color.BLACK); textSize = 18f
       setPadding(dp(22), dp(14), dp(22), dp(14))
@@ -362,10 +387,9 @@ class MainActivity : AppCompatActivity() {
         return minOf(info.errorCount * 300L, 800L)
       }
     }
-    // TS-Streams ohne Bildmarkierungen (AUD) sonst endlos im Puffern: Bildgrenzen selbst erkennen
-    val extractors = androidx.media3.extractor.DefaultExtractorsFactory()
-      .setTsExtractorFlags(androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
-    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http), extractors).setLoadErrorHandlingPolicy(retry)
+    // Hinweis: FLAG_DETECT_ACCESS_UNITS bewusst NICHT gesetzt. Es zerlegt bei Halbbild-Sendern (1080i, viele deutsche
+    // und türkische Kanäle) jedes Bild in zwei, das Bild ruckelt dann und läuft dem Ton davon.
+    return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)).setLoadErrorHandlingPolicy(retry)
   }
 
   // ---------- Ausfallsicherheit ----------
@@ -507,6 +531,7 @@ class MainActivity : AppCompatActivity() {
     val std = floatArrayOf(23.976f, 24f, 25f, 29.97f, 30f, 50f, 59.94f, 60f)
     val fps = std.minByOrNull { Math.abs(it - raw) } ?: return
     if (Math.abs(fps - raw) > 1.5f) return
+    if (isLive && fps != 25f && fps != 50f) return
     // gewünschte Rate: 24p als 24 Hz, 25/30p doppelt (50/60 Hz), 50/60p direkt
     val want = if (fps < 24.5f || fps >= 49f) fps else fps * 2
     @Suppress("DEPRECATION") val d = windowManager.defaultDisplay
@@ -623,7 +648,10 @@ class MainActivity : AppCompatActivity() {
     val codes = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.flatMap { ISO[it] ?: listOf(it) }
     p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
       .setPreferredAudioLanguages(*codes.toTypedArray())
-      .setPreferredTextLanguages(*codes.toTypedArray())
+      // Untertitel nicht automatisch einschalten (nur erzwungene, z. B. für fremdsprachige Stellen);
+      // einschalten/ausschalten über den Untertitel-Knopf in der Leiste
+      .setPreferredTextLanguages()
+      .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
       .build()
   }
 
@@ -698,7 +726,11 @@ class MainActivity : AppCompatActivity() {
     playerView.requestFocus()
     showInfo(6000)
     main.removeCallbacks(watchdog); main.postDelayed(watchdog, 1000)
-    hideChannels(); nextLabel = ""; nextView.visibility = View.GONE
+    hideChannels(); hideTracks(); nextLabel = ""; nextView.visibility = View.GONE
+    // jeder neue Titel startet ohne Untertitel (nur erzwungene); eine Auswahl gilt nur für den laufenden Titel
+    p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+      .clearOverridesOfType(C.TRACK_TYPE_TEXT).clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+      .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
     main.removeCallbacks(nextTick); main.postDelayed(nextTick, 1000)
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     startTimer()
@@ -784,6 +816,72 @@ class MainActivity : AppCompatActivity() {
   private val noticeOff = Runnable { showStatus(null) }
   private fun notice(t: String, ms: Long = 4000) { showStatus(t); main.removeCallbacks(noticeOff); main.postDelayed(noticeOff, ms) }
 
+  // ---------- Untertitel / Tonspur ----------
+  private fun langName(code: String?): String {
+    if (code.isNullOrEmpty() || code == "und") return "Unbekannt"
+    return try { java.util.Locale(code).getDisplayLanguage(java.util.Locale.GERMAN).replaceFirstChar { it.uppercase() } } catch (e: Exception) { code }
+  }
+  private fun showTracks(type: Int) {
+    val p = player ?: return
+    val rows = mutableListOf<String>(); val acts = mutableListOf<() -> Unit>()
+    var sel = 0
+    val textOff = p.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+    if (type == C.TRACK_TYPE_TEXT) {
+      rows += "Aus"; acts += {
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+          .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+      }
+    }
+    var anySelected = false
+    for (g in p.currentTracks.groups) {
+      if (g.type != type) continue
+      for (i in 0 until g.length) {
+        if (!g.isTrackSupported(i)) continue
+        val f = g.getTrackFormat(i)
+        var label = langName(f.language)
+        if (!f.label.isNullOrEmpty() && f.label != f.language) label += " · " + f.label
+        if (type == C.TRACK_TYPE_AUDIO && f.channelCount > 0) label += when (f.channelCount) { 1 -> " · Mono"; 2 -> " · Stereo"; 6 -> " · 5.1"; 8 -> " · 7.1"; else -> " · ${f.channelCount} Kanäle" }
+        if ((f.selectionFlags and C.SELECTION_FLAG_FORCED) != 0) label += " (erzwungen)"
+        val on = g.isTrackSelected(i) && !(type == C.TRACK_TYPE_TEXT && textOff)
+        if (on) { sel = rows.size; anySelected = true }
+        rows += label
+        val mg = g.mediaTrackGroup; val idx = i
+        acts += {
+          p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(type, false)
+            .setOverrideForType(androidx.media3.common.TrackSelectionOverride(mg, idx)).build()
+        }
+      }
+    }
+    if (type == C.TRACK_TYPE_TEXT && !anySelected) sel = 0
+    if (rows.size <= (if (type == C.TRACK_TYPE_TEXT) 1 else 0)) {
+      notice(if (type == C.TRACK_TYPE_TEXT) "Dieser Titel hat keine Untertitel." else "Nur eine Tonspur vorhanden.", 3000); return
+    }
+    trackTitle.text = if (type == C.TRACK_TYPE_TEXT) "Untertitel" else "Tonspur"
+    trackActions = acts
+    val chosen = sel
+    trackList.adapter = object : android.widget.BaseAdapter() {
+      override fun getCount() = rows.size
+      override fun getItem(i: Int) = rows[i]
+      override fun getItemId(i: Int) = i.toLong()
+      override fun getView(i: Int, cv: View?, parent: ViewGroup?): View {
+        val tv = (cv as? TextView) ?: TextView(this@MainActivity).apply { textSize = 17f; setPadding(dp(14), dp(11), dp(14), dp(11)) }
+        tv.text = (if (i == chosen) "✓  " else "     ") + rows[i]
+        tv.setTextColor(if (i == chosen) 0xFFE50914.toInt() else Color.WHITE)
+        return tv
+      }
+    }
+    playerView.hideController()
+    trackPanel.visibility = View.VISIBLE
+    trackList.requestFocus()
+    trackList.setSelection(sel)
+  }
+  private fun hideTracks() {
+    if (trackPanel.visibility != View.VISIBLE) return
+    trackPanel.visibility = View.GONE
+    playerView.requestFocus()
+  }
+
   // ---------- nächste Folge ----------
   private val nextTick = object : Runnable {
     override fun run() {
@@ -803,7 +901,7 @@ class MainActivity : AppCompatActivity() {
   private fun hidePlayer() {
     playToken++
     main.removeCallbacks(endSkip); endSkip.run()
-    hideChannels(); nextView.visibility = View.GONE; nextLabel = ""; main.removeCallbacks(nextTick)
+    hideChannels(); hideTracks(); nextView.visibility = View.GONE; nextLabel = ""; main.removeCallbacks(nextTick)
     retryTask?.let { main.removeCallbacks(it) }; retryTask = null
     main.removeCallbacks(watchdog); showStatus(null)
     // Bildrate erst nach einer Minute ohne Wiedergabe zurückstellen: beim Umschalten kein erneutes Schwarzbild
@@ -854,6 +952,13 @@ class MainActivity : AppCompatActivity() {
       val inButtons = ctrl && f != null && f !== playerView && !skipping     // Nutzer bewegt sich in den Knöpfen (z. B. Zahnrad für Tonspur)
       val first = down && event.repeatCount == 0
       if (DEBUG_LOG) android.util.Log.d("IPFLIX", "key=$k down=$down list=${chanPanel.visibility} focus=${window.currentFocus?.javaClass?.simpleName} ctrl=$ctrl inButtons=$inButtons")
+      // Untertitel-/Tonspur-Menü offen: Android bewegt die Auswahl; Zurück schließt es
+      if (trackPanel.visibility == View.VISIBLE) {
+        if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_DPAD_RIGHT) { if (first) hideTracks(); return true }
+        val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER
+        if (okKey && swallowOkUp) { if (!down) swallowOkUp = false; return true }
+        return super.dispatchKeyEvent(event)
+      }
       // Senderliste offen: Android bewegt die Auswahl; Zurück/links schließt sie
       if (chanPanel.visibility == View.VISIBLE) {
         if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_DPAD_LEFT) { if (first) hideChannels(); return true }
@@ -912,7 +1017,13 @@ class MainActivity : AppCompatActivity() {
         }
         val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER
         if (okKey) {
-          if (first) { playerView.showController(); if (f !is androidx.media3.ui.DefaultTimeBar) f.performClick() }
+          if (first) {
+            when (f.id) {
+              androidx.media3.ui.R.id.exo_subtitle -> { swallowOkUp = true; showTracks(C.TRACK_TYPE_TEXT) }
+              androidx.media3.ui.R.id.exo_settings -> { swallowOkUp = true; showTracks(C.TRACK_TYPE_AUDIO) }
+              else -> { playerView.showController(); if (f !is androidx.media3.ui.DefaultTimeBar) f.performClick() }
+            }
+          }
           return true
         }
         return super.dispatchKeyEvent(event)

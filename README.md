@@ -17,7 +17,8 @@ Gerät und braucht keinen fremden Server.
   - **Verpasst? Zurückschauen:** Bei Sendern mit Archiv beim Anbieter verpasste Sendungen der letzten Tage
     von Anfang an schauen.
 - **Filme und Serien:** links/rechts 10 Sekunden (halten = schneller), OK Pause, runter in die Knöpfe
-  (Zeitbalken, Tonspur/Untertitel). Am Ende einer Folge: „Nächste Folge in … s“, OK startet sofort.
+  (Zeitbalken, CC = Untertitel, Zahnrad = Tonspur). Untertitel sind anfangs aus (nur erzwungene erscheinen)
+  und lassen sich ein- und ausschalten. Am Ende einer Folge: „Nächste Folge in … s“, OK startet sofort.
 - **Lieblingsverein:** nächstes Spiel mit den Sendern, die es zeigen (TheSportsDB, Programm des Anbieters,
   `app-ui/broadcast.json`).
 - **Flüssig und ausfallsicher:**
