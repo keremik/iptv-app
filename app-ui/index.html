@@ -831,6 +831,22 @@ function popRank(it) {
   if (r === Infinity) for (const p of POP_PREFIX) if (k.indexOf(p[0]) === 0) { r = p[1]; break; }
   return (it.rank = r);
 }
+// Art einer Live-Kategorie: Sprache (aus dem Namen, sonst aus den Sendern), Sport, allgemein
+const SPORT_RE = /\b(sport|sports|spor|bein|dazn|eurosport|futbol|fussball|fu[sß]ball|bundesliga|s ?sport|tivibu ?spor|exxen ?spor|smart ?spor|tabii ?spor|nba|nfl|ufc|uefa|f1|formel)\b/;
+const GENERAL_RE = /\b(ulusal|genel|general|allgemein|national|vollprogramm|ana kanal|haupt|basic|deutschland|germany|almanya|turkiye|turkey|t[uü]rkiye|osterreich|austria|schweiz)\b/;
+const QUALITY_ONLY = /^(hd|fhd|uhd|4k|sd|hevc|h265|vip|raw|50fps|60fps|backup|yedek|[\s|\-:·•★]+)*$/;
+function catKind(name, items) {
+  const raw = String(name || '');
+  const f = fold(raw), rest = fold(prettyCat(raw));
+  let lang = langOf(raw);
+  if (!lang && items && items.length) {
+    const cnt = {}; items.forEach(it => { if (it.lang) cnt[it.lang] = (cnt[it.lang] || 0) + 1; });
+    lang = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || '';
+  }
+  const sport = SPORT_RE.test(f);
+  const general = !sport && (GENERAL_RE.test(f) || QUALITY_ONLY.test(rest.replace(/[^a-z0-9]+/g, ' ').trim()) || !rest.replace(/[^a-z0-9]/g, ''));
+  return { lang, sport, general };
+}
 const byPopularity = items => items.map((it, i) => [it, i]).sort((a, b) => popRank(a[0]) - popRank(b[0]) || a[1] - b[1]).map(x => x[0]);
 // Gleiche Sender nebeneinander, beste Auflösung links. Die Reihenfolge der Sender untereinander bleibt.
 function groupVariants(items) {
@@ -872,12 +888,20 @@ async function grouped(k) {
     by.get(c).push(it);
   }
   const groups = cats.filter(c => by.has(String(c.category_id)))
-                     .map(c => ({ title: prettyCat(c.category_name), lang: langOf(c.category_name), items: by.get(String(c.category_id)) }));
+                     .map(c => ({ title: prettyCat(c.category_name), raw: c.category_name, lang: langOf(c.category_name), items: by.get(String(c.category_id)) }));
   // gleicher Name in mehreren Sprachen (z. B. "Netflix"): Sprache dazuschreiben, außer bei der Hauptsprache
   const count = {};
   groups.forEach(g => { count[g.title] = (count[g.title] || 0) + 1; });
   groups.forEach(g => { if (count[g.title] > 1 && g.lang && g.lang !== (langs[0] || 'de')) g.title += ' · ' + LANGS[g.lang].label; });
-  if (k === 'live') groups.forEach(g => { g.items = groupVariants(byPopularity(g.items)); });
+  if (k === 'live') {
+    // Beliebte Sender zuerst nur in allgemeinen Kategorien ("TR Ulusal", "Deutschland", "DE HD" …);
+    // Themen-Kategorien (Magenta TV, Amazon, WOW, Sport …) behalten die Reihenfolge des Anbieters
+    groups.forEach(g => { g.kind = catKind(g.raw || g.title, g.items); g.items = groupVariants(g.kind.general ? byPopularity(g.items) : g.items); });
+    // Reihenfolge: Türkisch Sport, Türkisch allgemein, Deutsch Sport, Deutsch allgemein, danach der Rest wie beim Anbieter
+    const slot = g => g.kind.lang === 'tr' ? (g.kind.sport ? 0 : g.kind.general ? 1 : 9) : g.kind.lang === 'de' ? (g.kind.sport ? 2 : g.kind.general ? 3 : 9) : 9;
+    const order = groups.map((g, i) => [g, i]).sort((a, b) => slot(a[0]) - slot(b[0]) || a[1] - b[1]).map(x => x[0]);
+    groups.length = 0; order.forEach(g => groups.push(g));
+  }
   const known = new Set(cats.map(c => String(c.category_id)));
   const rest = items.filter(it => !known.has(String(it.cat)));
   if (rest.length) groups.push({ title: 'Weitere', items: rest });
@@ -1327,11 +1351,14 @@ const VIEWS = {
       const k = chanKey(it.name);
       if (it.archive && !seen.has(k)) { seen.add(k); arch.push(it); }
     }
+    // Zurückschauen hinter den wichtigsten Kategorien (Sport und allgemein, Türkisch und Deutsch)
+    let nTop = L.groups.findIndex(g => !g.kind || !(g.kind.lang === 'tr' || g.kind.lang === 'de') || !(g.kind.sport || g.kind.general));
+    if (nTop < 0) nTop = L.groups.length; if (nTop === 0) nTop = 1;
     return { title: 'Live TV', top: [matchBox(L.items, L.all)],
              rows: [{ title: 'Zuletzt gesehen', items: recentChannels(L.all, 12) }, { title: 'Deine Sender', items: topChannels(L.all, 14) },
-                    ...L.groups.slice(0, 1),
+                    ...L.groups.slice(0, nTop),
                     { title: 'Verpasst? Zurückschauen', items: arch.slice(0, ROW_MAX), cardOpts: it => ({ onClick: () => showArchive(it) }) },
-                    ...L.groups.slice(1)] };
+                    ...L.groups.slice(nTop)] };
   },
   async movie() {
     const M = await grouped('movie'), sM = sugg(M.items), rec = recommend('movie', sM, 40);
