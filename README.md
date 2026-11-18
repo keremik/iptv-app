@@ -32,6 +32,10 @@ Gerät und braucht keinen fremden Server.
 - **Beim Einschalten starten** (Einstellungen, abschaltbar): IPFLIX öffnet sich, wenn der Stick hochfährt oder aus
   dem Standby aufwacht. Android verlangt dafür einmal die Erlaubnis „Über anderen Apps einblenden“.
 - **Stabil:** Beendet Android die Oberfläche (z. B. bei knappem Speicher), baut die App sie neu auf statt abzustürzen.
+- **Beste Variante, gemessen:** Der Player misst bei Live-Sendern die tatsächliche Auflösung, Bildrate, Datenrate,
+  Hänger und verlorene Bilder (Anzeige oben im Player: „Empfangen: 1080p · 50 fps · H.264 · 8,4 Mbit/s“). Die
+  Varianten eines Senders werden danach sortiert: zuerst die beste, die flüssig läuft. Ein „4K“ im Namen, das nur
+  1080p sendet, wird erkannt; eine Variante, die hakt, rutscht nach unten.
 - **Bild:** bis 4K, Hardware-Decoder, Bildwiederholrate passend zur Sendung (50 Hz / 24 Hz, abschaltbar).
 
 ## Aufbau

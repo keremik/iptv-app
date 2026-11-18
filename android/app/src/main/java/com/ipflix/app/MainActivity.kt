@@ -101,6 +101,11 @@ class MainActivity : AppCompatActivity() {
   private var lastProgress = 0L
   private var bufStart = 0L
   @Volatile private var lastBytesAt = 0L
+  @Volatile private var bytesTotal = 0L
+  // Messung der tatsächlichen Stream-Qualität (Live): Auflösung, Bildrate, Datenrate, Hänger
+  private var qUrl = ""; private var qT0 = 0L; private var qB0 = 0L; private var qF0 = -1L; private var qD0 = 0
+  private var qStalls = 0; private var qReady = false; private var qToken = -1
+  private lateinit var qualityView: TextView
   private var loadStartAt = 0L
   private var retryTask: Runnable? = null
   private lateinit var statusView: TextView
@@ -197,7 +202,10 @@ class MainActivity : AppCompatActivity() {
     }
     // Beste Qualität von Anfang an: hohe Startschätzung der Bandbreite statt mit der kleinsten Stufe zu beginnen
     val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(25_000_000L).build()
-    val selector = DefaultTrackSelector(this).apply {
+    // Bei Streams mit mehreren Stufen (HLS): schneller hoch auf die beste Stufe (5 s statt 10 s),
+    // mehr der gemessenen Bandbreite nutzen (85 % statt 70 %), nur bei echtem Engpass herunter.
+    val adaptive = androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection.Factory(5_000, 25_000, 25_000, 0.85f)
+    val selector = DefaultTrackSelector(this, adaptive).apply {
       setParameters(buildUponParameters()
         .setViewportSizeToPhysicalDisplaySize(this@MainActivity, true)
         .setExceedRendererCapabilitiesIfNecessary(true))
@@ -248,8 +256,10 @@ class MainActivity : AppCompatActivity() {
     }
     titleView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 20f }
     subtitleView = TextView(this).apply { setTextColor(0xFFB3B3B3.toInt()); textSize = 14f; visibility = View.GONE }
+    qualityView = TextView(this).apply { setTextColor(0xFF8C8C8C.toInt()); textSize = 13f; visibility = View.GONE }
     bar.addView(titleView)
     bar.addView(subtitleView)
+    bar.addView(qualityView)
     overlay.addView(bar, FrameLayout.LayoutParams(
       ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
     skipView = TextView(this).apply {
@@ -388,7 +398,7 @@ class MainActivity : AppCompatActivity() {
       .setTransferListener(object : androidx.media3.datasource.TransferListener {
         override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
         override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) { lastBytesAt = SystemClock.uptimeMillis() }
-        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) { lastBytesAt = SystemClock.uptimeMillis() }
+        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) { lastBytesAt = SystemClock.uptimeMillis(); bytesTotal += bytesTransferred }
         override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
       })
       .setKeepPostFor302Redirects(true)
@@ -525,6 +535,50 @@ class MainActivity : AppCompatActivity() {
   }
   private var netCallback: ConnectivityManager.NetworkCallback? = null
 
+  // ---------- Tatsächliche Qualität messen ----------
+  private fun decodedFrames(): Long = player?.videoDecoderCounters?.let {
+    it.ensureUpdated(); (it.renderedOutputBufferCount + it.skippedOutputBufferCount + it.droppedBufferCount).toLong() } ?: -1L
+  private fun startQuality() {
+    if (qUrl.isEmpty() || qToken == playToken) return
+    qToken = playToken
+    val tok = playToken
+    // erst nach dem Anlaufen messen (der Startpuffer würde die Datenrate verfälschen)
+    main.postDelayed({
+      if (tok != playToken || qUrl.isEmpty()) return@postDelayed
+      qReady = true; qT0 = SystemClock.uptimeMillis(); qB0 = bytesTotal; qF0 = decodedFrames(); qStalls = 0
+      qD0 = player?.videoDecoderCounters?.droppedBufferCount ?: 0
+      main.postDelayed({ if (tok == playToken) reportQuality(false) }, 20_000)
+    }, 8_000)
+  }
+  // final = Sender wird verlassen: Ergebnis mit Hängern an die Oberfläche (wählt danach die beste Variante)
+  private fun reportQuality(final: Boolean) {
+    val p = player ?: return
+    if (qUrl.isEmpty() || qT0 == 0L) return
+    val secs = (SystemClock.uptimeMillis() - qT0) / 1000.0
+    if (secs < 15) return
+    val f = p.videoFormat
+    val w = f?.width ?: -1; val h = f?.height ?: -1
+    val frames = decodedFrames()
+    // Bildrate aus dem Stream; fehlt sie (oft bei TS), aus den dekodierten Bildern
+    val fps = if ((f?.frameRate ?: -1f) > 1f) f!!.frameRate.toDouble() else if (qF0 >= 0 && frames > qF0) (frames - qF0) / secs else -1.0
+    val kbps = ((bytesTotal - qB0) * 8 / 1000.0 / secs).toInt()
+    val mime = f?.sampleMimeType ?: ""
+    val codec = when { mime.contains("hevc") -> "HEVC"; mime.contains("avc") -> "H.264"; mime.contains("mpeg2") -> "MPEG-2"; mime.contains("av01") -> "AV1"; else -> mime.substringAfter('/').uppercase() }
+    val dropped = maxOf(0, (p.videoDecoderCounters?.droppedBufferCount ?: 0) - qD0)
+    if (!final && h > 0) {
+      val res = if (h >= 2000) "4K" else if (h >= 1000) "1080" else if (h >= 700) "720" else "${h}"
+      val fpsTxt = if (fps > 10) " · ${Math.round(fps)} fps" else ""
+      qualityView.text = "Empfangen: ${res}${if (res == "4K") "" else "p"}$fpsTxt · $codec · ${"%.1f".format(kbps / 1000.0).replace('.', ',')} Mbit/s"
+      qualityView.visibility = View.VISIBLE
+    }
+    val js = org.json.JSONObject().apply {
+      put("u", qUrl); put("w", w); put("h", h); put("fps", Math.round(fps * 10) / 10.0); put("kbps", kbps)
+      put("codec", codec); put("stalls", qStalls); put("secs", Math.round(secs)); put("dropped", dropped); put("final", final)
+    }
+    if (final) { qT0 = 0L; qReady = false }
+    runJs("window.__player&&__player.quality&&__player.quality(" + org.json.JSONObject.quote(js.toString()) + ")")
+  }
+
   // ---------- Bildwiederholrate (ruckelfreie Bewegungen, z. B. Fußball mit 50 Bildern/s) ----------
   private fun measureFps() {
     val p = player ?: return
@@ -587,6 +641,7 @@ class MainActivity : AppCompatActivity() {
         runJs("window.__player&&__player.playing&&__player.playing()")
         showStatus(null)
         measureFps()
+        startQuality()
         // stabil gelaufen: Zähler für Wiederholversuche zurücksetzen
         val tok = playToken
         main.postDelayed({ if (tok == playToken && player?.isPlaying == true) { attempts = 0; authRetry = false } }, 15_000)
@@ -596,7 +651,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPlaybackStateChanged(state: Int) {
       // Protokoll (logcat "IPFLIX"): Pufferphasen mit Dauer, um Hänger zu messen
       val now = SystemClock.uptimeMillis()
-      if (state == Player.STATE_BUFFERING) bufStart = now
+      if (state == Player.STATE_BUFFERING) { bufStart = now; if (qReady && isLive) qStalls++ }
       if (state == Player.STATE_READY && bufStart > 0) {
         android.util.Log.i("IPFLIX", "Puffern beendet nach ${now - bufStart} ms (live=$isLive)"); bufStart = 0
       }
@@ -728,6 +783,9 @@ class MainActivity : AppCompatActivity() {
 
   private fun showPlayer(url: String, live: Boolean, title: String, startSec: Int, alt: String) {
     val p = player ?: return
+    reportQuality(true)
+    qUrl = if (live) url else ""; qReady = false; qT0 = 0L; qStalls = 0
+    qualityView.text = ""; qualityView.visibility = View.GONE
     playToken++
     isLive = live
     urls = listOf(url, alt).filter { it.isNotEmpty() }.distinct()
@@ -924,6 +982,8 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun hidePlayer() {
+    reportQuality(true)
+    qUrl = ""
     playToken++
     main.removeCallbacks(endSkip); endSkip.run()
     hideChannels(); hideTracks(); nextView.visibility = View.GONE; nextLabel = ""; main.removeCallbacks(nextTick)
