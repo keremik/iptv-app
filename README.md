@@ -28,6 +28,9 @@ Gerät und braucht keinen fremden Server.
   - Ohne Internet wartet sie und spielt weiter, sobald es zurück ist.
 - **Schnellstart:** Die Listen des Anbieters werden auf dem Gerät gespeichert. Die App startet sofort mit dem
   letzten Stand und aktualisiert im Hintergrund (beim Start, beim Zurückkehren, alle 6 Stunden).
+- **Beim Einschalten starten** (Einstellungen, abschaltbar): IPFLIX öffnet sich, wenn der Stick hochfährt oder aus
+  dem Standby aufwacht. Android verlangt dafür einmal die Erlaubnis „Über anderen Apps einblenden“.
+- **Stabil:** Beendet Android die Oberfläche (z. B. bei knappem Speicher), baut die App sie neu auf statt abzustürzen.
 - **Bild:** bis 4K, Hardware-Decoder, Bildwiederholrate passend zur Sendung (50 Hz / 24 Hz, abschaltbar).
 
 ## Aufbau
