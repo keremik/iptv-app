@@ -384,6 +384,14 @@
         dann ohne Ruckeln. Beim Umschalten wird das Bild kurz schwarz.</p>
       <div class="chips" id="afrChips"></div>
     </div>
+    <div class="sgroup" id="tmdbGroup">
+      <h3>Trailer auf Deutsch und Türkisch (TMDB)</h3>
+      <p class="hint">Mit einem kostenlosen Schlüssel der Filmdatenbank TMDB startet „Trailer“ direkt den deutschen bzw. türkischen
+        Trailer. So bekommst du ihn: themoviedb.org → Konto anlegen → Einstellungen → API → Schlüssel anfordern
+        (Developer, privater Zweck) → den „API-Schlüssel“ (32 Zeichen) hier eintragen. Ohne Schlüssel gibt es die YouTube-Suche in der App.</p>
+      <div class="teamrow"><input id="tmdbIn" placeholder="API-Schlüssel (32 Zeichen)" autocomplete="off" spellcheck="false"><button type="button" class="btn more" id="tmdbCheck">Prüfen</button></div>
+      <p id="tmdbRes" class="hint"></p>
+    </div>
     <div class="sgroup" id="probeGroup">
       <h3>Senderstatus (Ampel)</h3>
       <p class="hint">Punkt am Sender: grün läuft flüssig, gelb hakt manchmal, rot gestört. Bleibt die Auswahl kurz auf einem
@@ -474,6 +482,7 @@ window.__player = {
   // gemessene Stream-Qualität (Auflösung, Bildrate, Datenrate, Hänger) für die Wahl der besten Variante
   quality: function (json) { try { const d = JSON.parse(json); qRecord(d); const m = /\/(\d+)\.(?:ts|m3u8)/.exec(decodeURIComponent(d.u || '')); if (m) paintDots(m[1]); } catch (e) {} },
   probe: function (id, json) { probeResult(id, json); },
+  browserClosed: function () {},
   // App verlassen (Home-Taste) bzw. zurückgekehrt: Sehzeit sichern bzw. neu beginnen
   hidden: function () { endLive(); saveProgress(true); },
   shown: function () {
@@ -1825,9 +1834,53 @@ function ytId(v) {
   return m ? m[1] : '';
 }
 const filmLang = it => it.lang || itemLang(it.raw) || '';
+const LANG_WORD = { de: 'Deutsch', tr: 'Türkisch', en: 'Englisch' };
 function trailerQuery(it, yr) {
   const lg = filmLang(it);
   return `${it.name}${yr ? ' ' + yr : ''} ${lg === 'tr' ? 'fragman' : lg === 'de' || !lg ? 'trailer deutsch' : 'trailer'}`;
+}
+// TMDB (Filmdatenbank): Trailer nach Sprache. Schlüssel v3 (32 Zeichen) oder Lese-Token (eyJ…)
+let tmdbKey = store.get('tmdbKey', '') || '';
+function tmdb(path, key = tmdbKey) {
+  const k = String(key || '').trim();
+  const bearer = /^eyJ/.test(k);
+  const url = 'https://api.themoviedb.org/3/' + path + (bearer ? '' : (path.indexOf('?') >= 0 ? '&' : '?') + 'api_key=' + encodeURIComponent(k));
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 8000);
+  return fetch(url, { headers: bearer ? { Authorization: 'Bearer ' + k, accept: 'application/json' } : { accept: 'application/json' }, signal: ctl.signal })
+    .then(r => { clearTimeout(t); if (r.status === 401) throw new Error('Schlüssel ungültig'); if (!r.ok) throw new Error('TMDB ' + r.status); return r.json(); });
+}
+const pickVideo = list => {
+  const v = (list || []).filter(x => x.site === 'YouTube' && ytId(x.key));
+  const score = x => (x.type === 'Trailer' ? 4 : x.type === 'Teaser' ? 2 : 0) + (x.official ? 1 : 0);
+  v.sort((a, b) => score(b) - score(a) || String(b.published_at || '').localeCompare(String(a.published_at || '')));
+  return v[0] ? v[0].key : '';
+};
+const trailerMemo = {};
+// Bester Trailer: zuerst in der Sprache des Films (TMDB), dann der des Anbieters, dann Englisch
+async function findTrailer(it, providerRaw, tmdbId, yr) {
+  const lg = filmLang(it) === 'tr' ? 'tr' : 'de';
+  const mk = it.kind + it.id + lg;
+  if (trailerMemo[mk]) return trailerMemo[mk];
+  const prov = ytId(providerRaw);
+  let res = prov ? { id: prov, lang: '' } : null;
+  if (tmdbKey) {
+    try {
+      const kind = it.kind === 'series' ? 'tv' : 'movie';
+      let id = String(tmdbId || it.tmdb || '').replace(/\D/g, '');
+      if (!id) {
+        const q = `search/${kind}?query=${encodeURIComponent(it.name)}&language=${lg}-${lg.toUpperCase()}` + (yr ? (kind === 'tv' ? '&first_air_date_year=' : '&year=') + yr : '');
+        const r = await tmdb(q); id = r.results && r.results[0] ? String(r.results[0].id) : '';
+      }
+      if (id) {
+        const loc = lg === 'tr' ? 'tr-TR' : 'de-DE';
+        const own = pickVideo((await tmdb(`${kind}/${id}/videos?language=${loc}`)).results);
+        if (own) res = { id: own, lang: lg };
+        else if (!res) { const en = pickVideo((await tmdb(`${kind}/${id}/videos?language=en-US`)).results); if (en) res = { id: en, lang: 'en' }; }
+      }
+    } catch (e) {}
+  }
+  if (res) trailerMemo[mk] = res;
+  return res;
 }
 function playTrailer(id, it) {
   const hl = filmLang(it) === 'tr' ? 'tr' : 'de';
@@ -1844,18 +1897,23 @@ function playTrailer(id, it) {
   pushOverlay(() => { box.remove(); if (prev && prev.focus) prev.focus({ preventScroll: true }); });
   f.focus();
 }
-function addTrailer(acts, it, raw, yr) {
-  if (acts.querySelector('.trailer')) return;
-  const id = ytId(raw);
-  if (id) {
-    const b = button('btn more trailer', '▶  Trailer', () => playTrailer(id, it));
+// YouTube-Suche in der Sprache des Films, im eingebauten Browser (die App bleibt offen)
+function searchTrailer(it, yr) {
+  const q = encodeURIComponent(trailerQuery(it, yr));
+  if (APP && window.NativePlayer.browse) { try { window.NativePlayer.browse('https://m.youtube.com/results?search_query=' + q); return; } catch (e) {} }
+  window.open('https://www.youtube.com/results?search_query=' + q, '_blank', 'noopener');
+}
+async function addTrailer(acts, it, raw, yr, tmdbId) {
+  if (acts.querySelector('.trailer-search')) return;
+  const search = button('btn more trailer-search', 'YouTube-Suche', () => searchTrailer(it, yr));
+  acts.append(search);
+  const t = await findTrailer(it, raw, tmdbId, yr);
+  if (!acts.isConnected) return;
+  if (t) {
+    const lbl = '▶  Trailer' + (t.lang && LANG_WORD[t.lang] ? ' (' + LANG_WORD[t.lang] + ')' : '');
+    const b = button('btn more trailer', lbl, () => playTrailer(t.id, it));
     acts.insertBefore(b, acts.children[1] || null);
-  }
-  // Suche in der Sprache des Films; öffnet die YouTube-App
-  const a = el('a', 'btn more trailer-search', id ? 'YouTube' : '▶  Trailer auf YouTube');
-  a.href = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(trailerQuery(it, yr));
-  a.target = '_blank'; a.rel = 'noopener';
-  acts.append(a);
+  } else search.textContent = '▶  Trailer suchen';
 }
 async function showDetails(it) {
   const prev = document.activeElement;
@@ -1898,7 +1956,7 @@ async function showDetails(it) {
       plot.textContent = i.plot || i.description || it.plot || '';
       fillMeta(meta, { ...it, year: year(i.releasedate) || it.year, rating: i.rating || it.rating, genre: i.genre, duration: i.duration });
       sideInfo([['Besetzung', i.cast || i.actors], ['Regie', i.director], ['Genres', i.genre]]);
-      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releasedate) || it.year);
+      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releasedate) || it.year, i.tmdb_id || i.tmdb);
     } else {
       eps.append(el('div', 'spinner small'));
       const d = await getSeriesInfo(it.id), i = d.info || {};
@@ -1907,7 +1965,7 @@ async function showDetails(it) {
       const seasons = Object.keys(d.episodes || {}).sort((a, b) => a - b);
       fillMeta(meta, { ...it, year: year(i.releaseDate) || it.year, rating: i.rating || it.rating, genre: i.genre, seasons: seasons.length });
       sideInfo([['Besetzung', i.cast], ['Regie', i.director], ['Genres', i.genre]]);
-      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releaseDate) || it.year);
+      addTrailer(acts, it, i.youtube_trailer || i.trailer, year(i.releaseDate) || it.year, i.tmdb_id || i.tmdb);
       renderEpisodes(eps, it, d, seasons);
     }
   } catch (e) {
@@ -2504,6 +2562,7 @@ function showSetup(firstRun) {
   window.scrollTo(0, 0);
   $('#setupTitle').textContent = firstRun ? 'Willkommen! Kurz einrichten' : 'Einstellungen';
   $('#teamIn').value = team || '';
+  $('#tmdbIn').value = tmdbKey; $('#tmdbRes').textContent = tmdbKey ? 'Schlüssel gespeichert.' : '';
   $('#teamRes').textContent = '';
   sLangs = langs.slice(); sRes = maxRes; sLite = liteMode; sAfr = afrMode;
   $('#afrGroup').hidden = !APP;
@@ -2531,6 +2590,13 @@ function closeSetup() {
   $('#setup').hidden = true;
   go('home', null, 'replace');
 }
+$('#tmdbCheck').onclick = async () => {
+  const k = $('#tmdbIn').value.trim();
+  if (!k) { $('#tmdbRes').textContent = 'Kein Schlüssel: Trailer kommen vom Anbieter, dazu die YouTube-Suche.'; return; }
+  $('#tmdbRes').textContent = 'Prüfe …';
+  try { await tmdb('configuration', k); $('#tmdbRes').textContent = '✓ Schlüssel funktioniert.'; }
+  catch (e) { $('#tmdbRes').textContent = e.message === 'Schlüssel ungültig' ? '✗ Schlüssel ungültig. Bitte genau so eintragen, wie er bei TMDB steht.' : 'Prüfung gerade nicht möglich (keine Verbindung).'; }
+};
 $('#teamCheck').onclick = async () => {
   const t = $('#teamIn').value.trim();
   if (!t) { $('#teamRes').textContent = 'Kein Verein: es wird kein Spiel angezeigt.'; return; }
@@ -2551,6 +2617,8 @@ $('#setupForm').onsubmit = e => {
   liteMode = sLite; store.set('liteMode', liteMode); applyLite();
   afrMode = sAfr; store.set('afrMode', afrMode); applyAfr();
   probeOn = sProbe === 'on'; store.set('probeOn', probeOn);
+  const nk = $('#tmdbIn').value.trim();
+  if (nk !== tmdbKey) { tmdbKey = nk; store.set('tmdbKey', tmdbKey); for (const k in trailerMemo) delete trailerMemo[k]; }
   store.set('setupDone', true);
   if (langChanged) { langMiss.clear(); clearCache(); }
   let msg = 'Einstellungen gespeichert.', sticky = false;

@@ -41,8 +41,10 @@ Gerät und braucht keinen fremden Server.
   4 s lang ohne Bild geöffnet; nur wenn nichts läuft, nie mehr als eine Verbindung, höchstens 40 Prüfungen in 10 Minuten).
 - **Ton-Versatz und Ton-Test:** Einstellungen → Ton-Versatz. Der Ton-Test zeigt Blitz und Piepton exakt gleichzeitig
   und die Messung des Players; mit links/rechts in 10-ms-Schritten (hoch/runter 50 ms) nachstellen.
-- **Trailer:** in den Filmdetails, falls der Anbieter einen liefert, im YouTube-Player direkt in der App; dazu die
-  YouTube-Suche in der Sprache des Films („trailer deutsch“ bzw. „fragman“).
+- **Trailer in der App:** „▶ Trailer (Deutsch/Türkisch)“ in den Film- und Seriendetails. Mit einem kostenlosen
+  TMDB-Schlüssel (Einstellungen) wird der Trailer in der Sprache des Films gesucht, sonst kommt er vom Anbieter. Er läuft
+  im YouTube-Player in der App. Dazu „YouTube-Suche“: ein eingebauter Browser mit der Suche „… trailer deutsch“ bzw.
+  „… fragman“ (hoch/runter springt von Treffer zu Treffer, OK öffnet, Zurück schließt).
 - **Bild:** bis 4K, Hardware-Decoder, Bildwiederholrate passend zur Sendung (50 Hz / 24 Hz, abschaltbar).
 
 ## Aufbau

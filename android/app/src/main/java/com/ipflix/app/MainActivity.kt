@@ -115,6 +115,44 @@ class MainActivity : AppCompatActivity() {
   private val syncMeter = SyncMeter { syncSink }
   private var avOffsetMs = 0
   private var syncTest = false
+  // ---------- Eingebauter Browser (z. B. YouTube-Suche nach einem Trailer) ----------
+  private var browser: WebView? = null
+  private fun openBrowser(url: String) {
+    if (!url.startsWith("https://") && !url.startsWith("http://")) return
+    closeBrowser()
+    val b = WebView(this)
+    b.settings.apply {
+      javaScriptEnabled = true; domStorageEnabled = true
+      mediaPlaybackRequiresUserGesture = false
+      setSupportMultipleWindows(false)
+    }
+    b.setBackgroundColor(Color.BLACK)
+    b.webChromeClient = WebChromeClient()
+    b.webViewClient = object : WebViewClient() {
+      // nur Webseiten im Browser; App-Links (intent:, vnd.youtube:) nicht öffnen, damit IPFLIX vorne bleibt
+      override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+        val sch = request.url.scheme ?: ""
+        return !(sch == "https" || sch == "http")
+      }
+      override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+        main.post { if (browser === view) { browser = null; try { root.removeView(view); view.destroy() } catch (e: Exception) {} ; webView.requestFocus() } }
+        return true
+      }
+    }
+    root.addView(b, matchParent())
+    b.bringToFront()
+    browser = b
+    b.isFocusable = true; b.isFocusableInTouchMode = true
+    b.requestFocus()
+    b.loadUrl(url)
+  }
+  private fun closeBrowser() {
+    val b = browser ?: return
+    browser = null
+    try { b.loadUrl("about:blank"); root.removeView(b); b.destroy() } catch (e: Exception) {}
+    webView.requestFocus()
+    runJs("window.__player&&__player.browserClosed&&__player.browserClosed()")
+  }
   // ---------- Senderstatus (Ampel) ----------
   private val probeExec = java.util.concurrent.Executors.newSingleThreadExecutor()
   @Volatile private var probeConn: HttpURLConnection? = null
@@ -817,6 +855,7 @@ class MainActivity : AppCompatActivity() {
     @JavascriptInterface fun avOffset(ms: Int) { main.post { setAvOffset(ms) } }
     // Ton-Test: Testbild mit Blitz und Piepton (exakt gleichzeitig), Versatz mit links/rechts einstellen
     @JavascriptInterface fun syncTest() { main.post { startSyncTest() } }
+    @JavascriptInterface fun browse(url: String) { main.post { openBrowser(url) } }
     // Senderstatus ohne Abspielen: Stream kurz öffnen und messen, wie schnell und gleichmäßig Daten kommen
     @JavascriptInterface fun probe(id: String, url: String) {
       probeExec.execute {
@@ -1117,6 +1156,22 @@ class MainActivity : AppCompatActivity() {
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     val k = event.keyCode
     val down = event.action == KeyEvent.ACTION_DOWN
+    // Eingebauter Browser (YouTube-Trailer): hoch/runter springt von Link zu Link, Zurück geht zurück bzw. schließt
+    browser?.let { b ->
+      when (k) {
+        KeyEvent.KEYCODE_BACK -> {
+          if (down && event.repeatCount == 0) { if (b.canGoBack()) b.goBack() else closeBrowser() }
+          return true
+        }
+        KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_UP -> {
+          val shift = if (k == KeyEvent.KEYCODE_DPAD_UP) KeyEvent.META_SHIFT_ON else 0
+          b.dispatchKeyEvent(KeyEvent(event.downTime, event.eventTime, event.action, KeyEvent.KEYCODE_TAB, event.repeatCount, shift))
+          return true
+        }
+        KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE -> return super.dispatchKeyEvent(event)
+        else -> { b.dispatchKeyEvent(event); return true }
+      }
+    }
     if (overlay.visibility == View.VISIBLE) {
       // Lautstaerke & Co. bleiben beim System
       if (k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN || k == KeyEvent.KEYCODE_VOLUME_MUTE) {
@@ -1339,6 +1394,7 @@ class MainActivity : AppCompatActivity() {
   }
 
   override fun onDestroy() {
+    closeBrowser()
     main.removeCallbacksAndMessages(null)
     player?.release(); player = null
     try { webView.destroy() } catch (e: Exception) {}
