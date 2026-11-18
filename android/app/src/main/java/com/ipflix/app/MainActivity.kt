@@ -453,7 +453,8 @@ class MainActivity : AppCompatActivity() {
       lastProgress = maxOf(lastProgress, lastBytesAt)
       if (DEBUG_LOG && p != null && (now / 1000) % 3 == 0L) android.util.Log.d("IPFLIX", "st=${p.playbackState} playing=${p.isPlaying} pos=${p.currentPosition} buf=${p.bufferedPosition} bytesAgo=${now - lastBytesAt}")
       if (p != null && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING) {
-        if (stallSince == 0L) stallSince = now
+        // erst ab Beginn des Ladens zählen (vorher war der Puffer evtl. voll und es kamen zu Recht keine Daten)
+        if (stallSince == 0L) { stallSince = now; lastProgress = maxOf(lastProgress, now) }
         // TS liefert laufend Daten (4 s ohne Daten = tot); HLS kommt in Stücken, dort länger warten
         val ts = urls.getOrNull(urlIdx)?.substringBefore('?')?.endsWith(".ts") == true
         // vor den ersten Daten großzügiger (manche Anbieter brauchen ein paar Sekunden, bis ein Sender anläuft)
@@ -889,7 +890,33 @@ class MainActivity : AppCompatActivity() {
       }
       // In den Knöpfen: Android selbst die Auswahl bewegen lassen (links/rechts/hoch/runter zwischen Knöpfen,
       // Zeitbalken und Zahnrad). Vorher wurde jede Taste hier "verschluckt", dadurch blieb die Auswahl hängen.
-      if (inButtons) return super.dispatchKeyEvent(event)
+      if (inButtons && f != null) {
+        // Der Player fängt Pfeiltasten ab, solange seine Leiste noch einblendet (bei laufendem Film ständig).
+        // Deshalb bewegt die App die Auswahl selbst: zwischen Knöpfen, Zeitbalken und Zahnrad.
+        val dir = when (k) {
+          KeyEvent.KEYCODE_DPAD_LEFT -> View.FOCUS_LEFT; KeyEvent.KEYCODE_DPAD_RIGHT -> View.FOCUS_RIGHT
+          KeyEvent.KEYCODE_DPAD_UP -> View.FOCUS_UP; KeyEvent.KEYCODE_DPAD_DOWN -> View.FOCUS_DOWN; else -> 0
+        }
+        if (dir != 0) {
+          if (down) {
+            playerView.showController()                     // Leiste bleibt offen, solange bedient wird
+            if (f is androidx.media3.ui.DefaultTimeBar && (dir == View.FOCUS_LEFT || dir == View.FOCUS_RIGHT)) {
+              f.onKeyDown(k, event)                         // Zeitbalken: links/rechts = 10 s schieben
+            } else {
+              val nx = android.view.FocusFinder.getInstance().findNextFocus(playerView, f, dir)
+              if (DEBUG_LOG) android.util.Log.d("IPFLIX", "nav dir=$dir from=${resources.getResourceEntryName(f.id.takeIf { it > 0 } ?: android.R.id.content)} to=${nx?.let { if (it.id > 0) resources.getResourceEntryName(it.id) else it.javaClass.simpleName }}")
+              nx?.requestFocus()
+            }
+          }
+          return true
+        }
+        val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER
+        if (okKey) {
+          if (first) { playerView.showController(); if (f !is androidx.media3.ui.DefaultTimeBar) f.performClick() }
+          return true
+        }
+        return super.dispatchKeyEvent(event)
+      }
       val isOk = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER ||
                  k == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == KeyEvent.KEYCODE_SPACE
       when (k) {
