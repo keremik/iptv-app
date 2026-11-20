@@ -1,5 +1,7 @@
 # Radio DE·TR
 
+![Vorschau](vorschau.png)
+
 Radio-App für Android (ab Android 8, abgestimmt auf Samsung One UI 9 / Android 17) mit deutschen und türkischen Sendern.
 
 **Download:** `radio.apk` im Hauptordner des Repos.
