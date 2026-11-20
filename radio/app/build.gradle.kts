@@ -26,8 +26,8 @@ android {
     applicationId = "com.keremik.radio"
     minSdk = 26
     targetSdk = 37
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1"
   }
 
   buildTypes {
@@ -38,11 +38,12 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
   }
-  buildFeatures { compose = true }
+  buildFeatures { compose = true; buildConfig = true }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
+  testOptions { unitTests.isIncludeAndroidResources = true }
   packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
@@ -66,4 +67,10 @@ dependencies {
   implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.1")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2")
+
+  // Nur für Bildschirmfotos der Oberfläche auf der JVM (Robolectric), nicht in der App.
+  testImplementation("junit:junit:4.13.2")
+  testImplementation("org.robolectric:robolectric:4.18.1")
+  testImplementation("androidx.compose.ui:ui-test-junit4")
+  debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

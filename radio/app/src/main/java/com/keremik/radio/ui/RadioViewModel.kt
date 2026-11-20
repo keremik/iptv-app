@@ -48,21 +48,25 @@ sealed interface RecState {
   data class Message(val text: Int, val arg: String? = null) : RecState
 }
 
-class RadioViewModel(app: Application) : AndroidViewModel(app) {
+class RadioViewModel(app: Application, connect: Boolean) : AndroidViewModel(app) {
+  constructor(app: Application) : this(app, true)
 
   var controller: MediaController? by mutableStateOf(null)
     private set
   var now by mutableStateOf(NowPlaying())
-    private set
+    internal set
   var rec: RecState by mutableStateOf(RecState.Idle)
     private set
   var micLevel by mutableFloatStateOf(0f)
     private set
 
+  /** Sender, für den gerade „Zu Liste hinzufügen“ offen ist (langes Drücken). */
+  var addToListFor: Station? by mutableStateOf(null)
+
   private var recJob: Job? = null
 
   init {
-    viewModelScope.launch {
+    if (connect) viewModelScope.launch {
       val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
       val c = MediaController.Builder(app, token).buildAsync().await()
       controller = c
@@ -73,7 +77,7 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     }
     // Sobald die Listen geladen sind, kann der laufende Sender zugeordnet werden (z. B. nach Neustart der App).
     viewModelScope.launch {
-      kotlinx.coroutines.flow.merge(Catalog.state(Catalog.DE), Catalog.state(Catalog.TR), Prefs.favorites).collect { refresh() }
+      kotlinx.coroutines.flow.merge(Catalog.state(Catalog.DE), Catalog.state(Catalog.TR), Prefs.favorites, Prefs.lists).collect { refresh() }
     }
   }
 
@@ -113,6 +117,13 @@ class RadioViewModel(app: Application) : AndroidViewModel(app) {
     if (c.playerError != null) { c.prepare(); c.play(); return }
     if (c.isPlaying || (c.playWhenReady && c.playbackState == Player.STATE_BUFFERING)) c.pause()
     else { if (c.playbackState == Player.STATE_IDLE) c.prepare(); c.play() }
+  }
+
+  /** ✕ im Mini-Player: Wiedergabe beenden und Benachrichtigung entfernen. */
+  fun stop() {
+    val c = controller ?: return
+    c.stop()
+    c.clearMediaItems()
   }
 
   fun next() = controller?.seekToNextMediaItem()

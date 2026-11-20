@@ -36,6 +36,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.keremik.radio.R
 import com.keremik.radio.data.Catalog
+import com.keremik.radio.data.Genres
 import com.keremik.radio.data.Http
 import com.keremik.radio.data.Prefs
 import com.keremik.radio.data.Station
@@ -109,7 +110,19 @@ class PlaybackService : MediaLibraryService() {
     )
 
     // Favoriten können sich in der App ändern – den Herz-Knopf im Auto/in der Benachrichtigung nachziehen.
-    scope.launch { Prefs.favorites.collect { refreshButtons() } }
+    scope.launch {
+      Prefs.favorites.collect {
+        refreshButtons()
+        session.notifyChildrenChanged(Catalog.FAV, it.size, null)
+      }
+    }
+    scope.launch {
+      Prefs.lists.collect { lists ->
+        session.notifyChildrenChanged(Items.ROOT, 5, null)
+        session.notifyChildrenChanged(FOLDER_LISTS, lists.size, null)
+        lists.forEach { session.notifyChildrenChanged(Catalog.LIST_PREFIX + it.id, it.stations.size, null) }
+      }
+    }
   }
 
   override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession = session
@@ -200,9 +213,34 @@ class PlaybackService : MediaLibraryService() {
 
   // ---------------------------------------------------------------- Bibliothek für Android Auto und Mediensteuerungen
 
-  private fun categoryTitle(cat: String) = getString(
-    when (cat) { Catalog.FAV -> R.string.tab_fav; Catalog.DE -> R.string.tab_de; else -> R.string.tab_tr }
-  )
+  private fun categoryTitle(cat: String): String = when {
+    cat == Catalog.FAV -> getString(R.string.tab_fav)
+    cat == Catalog.DE -> getString(R.string.tab_de)
+    cat == Catalog.TR -> getString(R.string.tab_tr)
+    cat == FOLDER_LISTS -> getString(R.string.my_lists)
+    cat == FOLDER_GENRES -> getString(R.string.tab_categories)
+    cat.startsWith(Catalog.LIST_PREFIX) -> Prefs.list(cat.removePrefix(Catalog.LIST_PREFIX))?.name ?: ""
+    cat.startsWith(Catalog.GENRE_PREFIX) -> Genres.byKey(cat.removePrefix(Catalog.GENRE_PREFIX))?.let { getString(it.label) } ?: ""
+    else -> ""
+  }
+
+  /** Ordner im Auto: Favoriten, Meine Listen, Deutschland, Türkei, Kategorien. */
+  private fun isFolder(id: String) = id == Items.ROOT || id == FOLDER_LISTS || id == FOLDER_GENRES ||
+    id == Catalog.FAV || id == Catalog.DE || id == Catalog.TR ||
+    (!id.contains('/') && (id.startsWith(Catalog.LIST_PREFIX) || id.startsWith(Catalog.GENRE_PREFIX)))
+
+  private fun children(parentId: String): List<MediaItem>? = when (parentId) {
+    Items.ROOT -> buildList {
+      add(Items.folder(Catalog.FAV, categoryTitle(Catalog.FAV)))
+      if (Prefs.lists.value.isNotEmpty()) add(Items.folder(FOLDER_LISTS, categoryTitle(FOLDER_LISTS), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED))
+      add(Items.folder(Catalog.DE, categoryTitle(Catalog.DE)))
+      add(Items.folder(Catalog.TR, categoryTitle(Catalog.TR)))
+      add(Items.folder(FOLDER_GENRES, categoryTitle(FOLDER_GENRES), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED))
+    }
+    FOLDER_LISTS -> Prefs.lists.value.map { Items.folder(Catalog.LIST_PREFIX + it.id, it.name) }
+    FOLDER_GENRES -> Genres.all.map { Items.folder(Catalog.GENRE_PREFIX + it.key, getString(it.label)) }
+    else -> null
+  }
 
   private suspend fun itemsOf(cat: String): List<MediaItem> = Catalog.stations(cat).map { Items.forStation(cat, it) }
 
@@ -251,11 +289,8 @@ class PlaybackService : MediaLibraryService() {
       session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String,
       page: Int, pageSize: Int, params: LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-      val all: List<MediaItem> = when (parentId) {
-        Items.ROOT -> listOf(Catalog.FAV, Catalog.DE, Catalog.TR).map { Items.folder(it, categoryTitle(it)) }
-        Catalog.FAV, Catalog.DE, Catalog.TR -> itemsOf(parentId)
-        else -> return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-      }
+      val all: List<MediaItem> = children(parentId)
+        ?: if (isFolder(parentId)) itemsOf(parentId) else return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
       val from = (page * pageSize).coerceAtMost(all.size)
       val to = (from + pageSize).coerceAtMost(all.size)
       LibraryResult.ofItemList(all.subList(from, to), params)
@@ -264,7 +299,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onGetItem(
       session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String,
     ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
-      if (mediaId in listOf(Catalog.FAV, Catalog.DE, Catalog.TR)) return@future LibraryResult.ofItem(Items.folder(mediaId, categoryTitle(mediaId)), null)
+      if (isFolder(mediaId)) return@future LibraryResult.ofItem(Items.folder(mediaId, categoryTitle(mediaId)), null)
       resolve(MediaItem.Builder().setMediaId(mediaId).build())?.let { LibraryResult.ofItem(it, null) }
         ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
     }
@@ -331,5 +366,7 @@ class PlaybackService : MediaLibraryService() {
 
   companion object {
     const val CMD_TOGGLE_FAV = "toggle_favorite"
+    const val FOLDER_LISTS = "lists"
+    const val FOLDER_GENRES = "genres"
   }
 }

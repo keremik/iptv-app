@@ -34,6 +34,9 @@ object Catalog {
   const val DE = "de"
   const val TR = "tr"
   const val FAV = "fav"
+  /** Kategorie-Kennung einer eigenen Liste: "l-<id>", einer Musikrichtung: "g-<key>". */
+  const val LIST_PREFIX = "l-"
+  const val GENRE_PREFIX = "g-"
   val COUNTRIES = listOf(DE, TR)
 
   private lateinit var app: Context
@@ -78,6 +81,11 @@ object Catalog {
   /** Senderliste einer Kategorie; wartet beim ersten Start, bis eine Liste da ist. */
   suspend fun stations(cat: String): List<Station> {
     if (cat == FAV) return Prefs.favorites.value
+    if (cat.startsWith(LIST_PREFIX)) return Prefs.list(cat.removePrefix(LIST_PREFIX))?.stations.orEmpty()
+    if (cat.startsWith(GENRE_PREFIX)) {
+      val g = Genres.byKey(cat.removePrefix(GENRE_PREFIX)) ?: return emptyList()
+      return Genres.stations(g, stations(DE), stations(TR))
+    }
     val flow = loaded[cat] ?: return emptyList()
     flow.first { it }
     return states.getValue(cat).value.stations
@@ -85,6 +93,7 @@ object Catalog {
 
   fun find(id: String): Station? =
     Prefs.favorites.value.firstOrNull { it.id == id }
+      ?: Prefs.lists.value.firstNotNullOfOrNull { l -> l.stations.firstOrNull { it.id == id } }
       ?: states.values.firstNotNullOfOrNull { s -> s.value.stations.firstOrNull { it.id == id } }
 
   /** Suche über beide Länder (für Sprachbefehle und die Suche in Android Auto). */

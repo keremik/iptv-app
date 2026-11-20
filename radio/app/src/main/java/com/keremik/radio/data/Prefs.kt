@@ -20,7 +20,21 @@ data class Song(val artist: String, val title: String, val album: String = "", v
   }
 }
 
-/** Favoriten, Verlauf der Erkennung und Einstellungen. Alles bleibt auf dem Gerät. */
+/** Eine eigene Senderliste ("Meine Listen"). */
+data class UserList(val id: String, val name: String, val stations: List<Station> = emptyList()) {
+  fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name)
+    .put("stations", JSONArray(stations.map { it.toJson() }))
+
+  companion object {
+    fun fromJson(o: JSONObject): UserList {
+      val arr = o.optJSONArray("stations") ?: JSONArray()
+      return UserList(o.getString("id"), o.getString("name"),
+        (0 until arr.length()).map { Station.fromJson(arr.getJSONObject(it)) })
+    }
+  }
+}
+
+/** Favoriten, eigene Listen, Verlauf der Erkennung und Einstellungen. Alles bleibt auf dem Gerät. */
 object Prefs {
   private lateinit var sp: SharedPreferences
 
@@ -30,9 +44,13 @@ object Prefs {
   private val _history = MutableStateFlow<List<Song>>(emptyList())
   val history: StateFlow<List<Song>> = _history.asStateFlow()
 
+  private val _lists = MutableStateFlow<List<UserList>>(emptyList())
+  val lists: StateFlow<List<UserList>> = _lists.asStateFlow()
+
   fun init(ctx: Context) {
     sp = ctx.getSharedPreferences("radio", Context.MODE_PRIVATE)
     _favorites.value = readList("favorites") { Station.fromJson(it) }
+    _lists.value = readList("lists") { UserList.fromJson(it) }
     _history.value = readList("history") { Song.fromJson(it) }
   }
 
@@ -56,6 +74,44 @@ object Prefs {
     list.add(to, list.removeAt(from))
     _favorites.value = list
     sp.edit().putString("favorites", JSONArray(list.map { it.toJson() }).toString()).apply()
+  }
+
+  fun removeFavorite(id: String) {
+    val next = _favorites.value.filterNot { it.id == id }
+    _favorites.value = next
+    sp.edit().putString("favorites", JSONArray(next.map { it.toJson() }).toString()).apply()
+  }
+
+  // ---------------------------------------------------------------- Meine Listen
+
+  fun list(id: String): UserList? = _lists.value.firstOrNull { it.id == id }
+
+  private fun saveLists(next: List<UserList>) {
+    _lists.value = next
+    sp.edit().putString("lists", JSONArray(next.map { it.toJson() }).toString()).apply()
+  }
+
+  private fun updateList(id: String, f: (UserList) -> UserList) = saveLists(_lists.value.map { if (it.id == id) f(it) else it })
+
+  fun createList(name: String): UserList {
+    val l = UserList(java.util.UUID.randomUUID().toString().take(8), name.trim().ifEmpty { "Liste" })
+    saveLists(_lists.value + l)
+    return l
+  }
+
+  fun renameList(id: String, name: String) = updateList(id) { it.copy(name = name.trim().ifEmpty { it.name }) }
+  fun deleteList(id: String) = saveLists(_lists.value.filterNot { it.id == id })
+
+  fun addToList(id: String, s: Station) = updateList(id) { l ->
+    if (l.stations.any { it.id == s.id }) l else l.copy(stations = l.stations + s)
+  }
+
+  fun removeFromList(id: String, stationId: String) = updateList(id) { l -> l.copy(stations = l.stations.filterNot { it.id == stationId }) }
+
+  fun moveInList(id: String, from: Int, to: Int) = updateList(id) { l ->
+    val m = l.stations.toMutableList()
+    if (from in m.indices && to in m.indices) m.add(to, m.removeAt(from))
+    l.copy(stations = m)
   }
 
   fun addSong(song: Song) {
